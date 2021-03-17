@@ -14,6 +14,14 @@ You can run Linux or xv6 on the emulator in your browser. [Online demo is here](
 
 ![animation](./screenshots/animation.gif)
 ![debugger](./screenshots/debugger.gif) -->
+## Getting the code
+
+```bash
+git clone git@github.com:chaoRIOS/riscv-rust.git
+cd riscv-rust
+git remote add rioslab git@github.com:chaoRIOS/riscv-rust.git
+git checkout rioslab/lab1
+```
 
 ## Setting up VS Code
 
