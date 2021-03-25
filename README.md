@@ -52,6 +52,13 @@ Install VS Code extension `Rust` with configuring
 
 **Note**: Multiple Rust extensions will be conflicting. Make sure you uninstalled any other Rust extensions.
 
+
+## Toolchain
+
+```bash
+/opt/riscv-toolchain-bin-imac-9.2.0/bin
+```
+
 ---
 
 

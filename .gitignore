@@ -5,3 +5,4 @@ cli/target
 wasm/Cargo.lock
 wasm/target
 screenshots/
+*dump
