@@ -286,12 +286,13 @@ impl Cpu {
 		}
 		self.mmu.tick(&mut self.csr[CSR_MIP_ADDRESS as usize]);
 		self.handle_interrupt(self.pc);
-		self.clock = self.clock.wrapping_add(1);
+		// self.clock = self.clock.wrapping_add(1);
 
 		// cpu core clock : mtime clock in clint = 8 : 1 is
 		// just an arbiraty ratio.
 		// @TODO: Implement more properly
 		self.write_csr_raw(CSR_CYCLE_ADDRESS, self.clock * 8);
+		self.write_csr_raw(_CSR_MCYCLE_ADDRESS, self.clock);
 	}
 
 	// @TODO: Rename?
@@ -321,8 +322,11 @@ impl Cpu {
 
 		match self.decode(word) {
 			Ok(inst) => {
+				let cycles = inst.cycles;
 				let result = (inst.operation)(self, word, instruction_address);
 				self.x[0] = 0; // hardwired zero
+				self.clock = self.clock.wrapping_add(cycles.into()); // 32-bit length non-compressed instruction
+
 				return result;
 			}
 			Err(()) => {
@@ -355,7 +359,7 @@ impl Cpu {
 	/// [`Instruction`](struct.Instruction.html). Not Using [`DecodeCache`](struct.DecodeCache.html)
 	/// so if you don't want to pollute the cache you should use this method
 	/// instead of `decode`.
-	fn decode_raw(&self, word: u32) -> Result<&Instruction, ()> {
+	pub fn decode_raw(&self, word: u32) -> Result<&Instruction, ()> {
 		match self.decode_and_get_instruction_index(word) {
 			Ok(index) => Ok(&INSTRUCTIONS[index]),
 			Err(()) => Err(()),
@@ -367,7 +371,7 @@ impl Cpu {
 	///
 	/// # Arguments
 	/// * `word` word instruction data decoded
-	fn decode_and_get_instruction_index(&self, word: u32) -> Result<usize, ()> {
+	pub fn decode_and_get_instruction_index(&self, word: u32) -> Result<usize, ()> {
 		for i in 0..INSTRUCTION_NUM {
 			let inst = &INSTRUCTIONS[i];
 			if (word & inst.mask) == inst.data {
@@ -1408,10 +1412,11 @@ impl Cpu {
 	}
 }
 
-struct Instruction {
+pub struct Instruction {
 	mask: u32,
 	data: u32, // @TODO: rename
 	name: &'static str,
+	cycles: u8,
 	operation: fn(cpu: &mut Cpu, word: u32, address: u64) -> Result<(), Trap>,
 	disassemble: fn(cpu: &mut Cpu, word: u32, address: u64, evaluate: bool) -> String,
 }
@@ -1758,6 +1763,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0xfe00707f,
 		data: 0x00000033,
 		name: "ADD",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_r(word);
 			cpu.x[f.rd] = cpu.sign_extend(cpu.x[f.rs1].wrapping_add(cpu.x[f.rs2]));
@@ -1769,6 +1775,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0x0000707f,
 		data: 0x00000013,
 		name: "ADDI",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_i(word);
 			cpu.x[f.rd] = cpu.sign_extend(cpu.x[f.rs1].wrapping_add(f.imm));
@@ -1780,6 +1787,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0x0000707f,
 		data: 0x0000001b,
 		name: "ADDIW",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_i(word);
 			cpu.x[f.rd] = cpu.x[f.rs1].wrapping_add(f.imm) as i32 as i64;
@@ -1791,6 +1799,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0xfe00707f,
 		data: 0x0000003b,
 		name: "ADDW",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_r(word);
 			cpu.x[f.rd] = cpu.x[f.rs1].wrapping_add(cpu.x[f.rs2]) as i32 as i64;
@@ -1802,6 +1811,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0xf800707f,
 		data: 0x0000302f,
 		name: "AMOADD.D",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_r(word);
 			let tmp = match cpu.mmu.load_doubleword(cpu.x[f.rs1] as u64) {
@@ -1824,6 +1834,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0xf800707f,
 		data: 0x0000202f,
 		name: "AMOADD.W",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_r(word);
 			let tmp = match cpu.mmu.load_word(cpu.x[f.rs1] as u64) {
@@ -1846,6 +1857,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0xf800707f,
 		data: 0x6000302f,
 		name: "AMOAND.D",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_r(word);
 			let tmp = match cpu.mmu.load_doubleword(cpu.x[f.rs1] as u64) {
@@ -1868,6 +1880,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0xf800707f,
 		data: 0x6000202f,
 		name: "AMOAND.W",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_r(word);
 			let tmp = match cpu.mmu.load_word(cpu.x[f.rs1] as u64) {
@@ -1890,6 +1903,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0xf800707f,
 		data: 0xe000302f,
 		name: "AMOMAXU.D",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_r(word);
 			let tmp = match cpu.mmu.load_doubleword(cpu.x[f.rs1] as u64) {
@@ -1913,6 +1927,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0xf800707f,
 		data: 0xe000202f,
 		name: "AMOMAXU.W",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_r(word);
 			let tmp = match cpu.mmu.load_word(cpu.x[f.rs1] as u64) {
@@ -1936,6 +1951,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0xf800707f,
 		data: 0x4000302f,
 		name: "AMOOR.D",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_r(word);
 			let tmp = match cpu.mmu.load_doubleword(cpu.x[f.rs1] as u64) {
@@ -1958,6 +1974,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0xf800707f,
 		data: 0x4000202f,
 		name: "AMOOR.W",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_r(word);
 			let tmp = match cpu.mmu.load_word(cpu.x[f.rs1] as u64) {
@@ -1980,6 +1997,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0xf800707f,
 		data: 0x0800302f,
 		name: "AMOSWAP.D",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_r(word);
 			let tmp = match cpu.mmu.load_doubleword(cpu.x[f.rs1] as u64) {
@@ -2002,6 +2020,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0xf800707f,
 		data: 0x0800202f,
 		name: "AMOSWAP.W",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_r(word);
 			let tmp = match cpu.mmu.load_word(cpu.x[f.rs1] as u64) {
@@ -2021,6 +2040,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0xfe00707f,
 		data: 0x00007033,
 		name: "AND",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_r(word);
 			cpu.x[f.rd] = cpu.sign_extend(cpu.x[f.rs1] & cpu.x[f.rs2]);
@@ -2032,6 +2052,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0x0000707f,
 		data: 0x00007013,
 		name: "ANDI",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_i(word);
 			cpu.x[f.rd] = cpu.sign_extend(cpu.x[f.rs1] & f.imm);
@@ -2043,6 +2064,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0x0000007f,
 		data: 0x00000017,
 		name: "AUIPC",
+		cycles: 10,
 		operation: |cpu, word, address| {
 			let f = parse_format_u(word);
 			cpu.x[f.rd] = cpu.sign_extend(address.wrapping_add(f.imm) as i64);
@@ -2054,6 +2076,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0x0000707f,
 		data: 0x00000063,
 		name: "BEQ",
+		cycles: 10,
 		operation: |cpu, word, address| {
 			let f = parse_format_b(word);
 			if cpu.sign_extend(cpu.x[f.rs1]) == cpu.sign_extend(cpu.x[f.rs2]) {
@@ -2067,6 +2090,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0x0000707f,
 		data: 0x00005063,
 		name: "BGE",
+		cycles: 10,
 		operation: |cpu, word, address| {
 			let f = parse_format_b(word);
 			if cpu.sign_extend(cpu.x[f.rs1]) >= cpu.sign_extend(cpu.x[f.rs2]) {
@@ -2080,6 +2104,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0x0000707f,
 		data: 0x00007063,
 		name: "BGEU",
+		cycles: 10,
 		operation: |cpu, word, address| {
 			let f = parse_format_b(word);
 			if cpu.unsigned_data(cpu.x[f.rs1]) >= cpu.unsigned_data(cpu.x[f.rs2]) {
@@ -2093,6 +2118,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0x0000707f,
 		data: 0x00004063,
 		name: "BLT",
+		cycles: 10,
 		operation: |cpu, word, address| {
 			let f = parse_format_b(word);
 			if cpu.sign_extend(cpu.x[f.rs1]) < cpu.sign_extend(cpu.x[f.rs2]) {
@@ -2106,6 +2132,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0x0000707f,
 		data: 0x00006063,
 		name: "BLTU",
+		cycles: 10,
 		operation: |cpu, word, address| {
 			let f = parse_format_b(word);
 			if cpu.unsigned_data(cpu.x[f.rs1]) < cpu.unsigned_data(cpu.x[f.rs2]) {
@@ -2119,6 +2146,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0x0000707f,
 		data: 0x00001063,
 		name: "BNE",
+		cycles: 10,
 		operation: |cpu, word, address| {
 			let f = parse_format_b(word);
 			if cpu.sign_extend(cpu.x[f.rs1]) != cpu.sign_extend(cpu.x[f.rs2]) {
@@ -2132,6 +2160,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0x0000707f,
 		data: 0x00003073,
 		name: "CSRRC",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_csr(word);
 			let data = match cpu.read_csr(f.csr) {
@@ -2152,6 +2181,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0x0000707f,
 		data: 0x00007073,
 		name: "CSRRCI",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_csr(word);
 			let data = match cpu.read_csr(f.csr) {
@@ -2171,6 +2201,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0x0000707f,
 		data: 0x00002073,
 		name: "CSRRS",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_csr(word);
 			let data = match cpu.read_csr(f.csr) {
@@ -2191,6 +2222,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0x0000707f,
 		data: 0x00006073,
 		name: "CSRRSI",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_csr(word);
 			let data = match cpu.read_csr(f.csr) {
@@ -2210,6 +2242,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0x0000707f,
 		data: 0x00001073,
 		name: "CSRRW",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_csr(word);
 			let data = match cpu.read_csr(f.csr) {
@@ -2230,6 +2263,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0x0000707f,
 		data: 0x00005073,
 		name: "CSRRWI",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_csr(word);
 			let data = match cpu.read_csr(f.csr) {
@@ -2249,6 +2283,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0xfe00707f,
 		data: 0x02004033,
 		name: "DIV",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_r(word);
 			let dividend = cpu.x[f.rs1];
@@ -2268,6 +2303,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0xfe00707f,
 		data: 0x02005033,
 		name: "DIVU",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_r(word);
 			let dividend = cpu.unsigned_data(cpu.x[f.rs1]);
@@ -2285,6 +2321,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0xfe00707f,
 		data: 0x0200503b,
 		name: "DIVUW",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_r(word);
 			let dividend = cpu.unsigned_data(cpu.x[f.rs1]) as u32;
@@ -2302,6 +2339,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0xfe00707f,
 		data: 0x0200403b,
 		name: "DIVW",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_r(word);
 			let dividend = cpu.x[f.rs1] as i32;
@@ -2321,6 +2359,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0xffffffff,
 		data: 0x00100073,
 		name: "EBREAK",
+		cycles: 10,
 		operation: |_cpu, _word, _address| {
 			// @TODO: Implement
 			Ok(())
@@ -2331,6 +2370,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0xffffffff,
 		data: 0x00000073,
 		name: "ECALL",
+		cycles: 10,
 		operation: |cpu, _word, address| {
 			let exception_type = match cpu.privilege_mode {
 				PrivilegeMode::User => TrapType::EnvironmentCallFromUMode,
@@ -2349,6 +2389,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0xfe00007f,
 		data: 0x02000053,
 		name: "FADD.D",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_r(word);
 			cpu.f[f.rd] = cpu.f[f.rs1] + cpu.f[f.rs2];
@@ -2360,6 +2401,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0xfff0007f,
 		data: 0xd2200053,
 		name: "FCVT.D.L",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_r(word);
 			cpu.f[f.rd] = cpu.x[f.rs1] as f64;
@@ -2371,6 +2413,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0xfff0007f,
 		data: 0x42000053,
 		name: "FCVT.D.S",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_r(word);
 			// Is this implementation correct?
@@ -2383,6 +2426,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0xfff0007f,
 		data: 0xd2000053,
 		name: "FCVT.D.W",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_r(word);
 			cpu.f[f.rd] = cpu.x[f.rs1] as i32 as f64;
@@ -2394,6 +2438,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0xfff0007f,
 		data: 0xd2100053,
 		name: "FCVT.D.WU",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_r(word);
 			cpu.f[f.rd] = cpu.x[f.rs1] as u32 as f64;
@@ -2405,6 +2450,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0xfff0007f,
 		data: 0x40100053,
 		name: "FCVT.S.D",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_r(word);
 			// Is this implementation correct?
@@ -2417,6 +2463,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0xfff0007f,
 		data: 0xc2000053,
 		name: "FCVT.W.D",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_r(word);
 			// Is this implementation correct?
@@ -2429,6 +2476,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0xfe00007f,
 		data: 0x1a000053,
 		name: "FDIV.D",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_r(word);
 			let dividend = cpu.f[f.rs1];
@@ -2451,6 +2499,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0x0000707f,
 		data: 0x0000000f,
 		name: "FENCE",
+		cycles: 10,
 		operation: |_cpu, _word, _address| {
 			// Do nothing?
 			Ok(())
@@ -2461,6 +2510,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0x0000707f,
 		data: 0x0000100f,
 		name: "FENCE.I",
+		cycles: 10,
 		operation: |_cpu, _word, _address| {
 			// Do nothing?
 			Ok(())
@@ -2471,6 +2521,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0xfe00707f,
 		data: 0xa2002053,
 		name: "FEQ.D",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_r(word);
 			cpu.x[f.rd] = match cpu.f[f.rs1] == cpu.f[f.rs2] {
@@ -2485,6 +2536,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0x0000707f,
 		data: 0x00003007,
 		name: "FLD",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_i(word);
 			cpu.f[f.rd] = match cpu
@@ -2502,6 +2554,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0xfe00707f,
 		data: 0xa2000053,
 		name: "FLE.D",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_r(word);
 			cpu.x[f.rd] = match cpu.f[f.rs1] <= cpu.f[f.rs2] {
@@ -2516,6 +2569,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0xfe00707f,
 		data: 0xa2001053,
 		name: "FLT.D",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_r(word);
 			cpu.x[f.rd] = match cpu.f[f.rs1] < cpu.f[f.rs2] {
@@ -2530,6 +2584,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0x0000707f,
 		data: 0x00002007,
 		name: "FLW",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_i(word);
 			cpu.f[f.rd] = match cpu.mmu.load_word(cpu.x[f.rs1].wrapping_add(f.imm) as u64) {
@@ -2544,6 +2599,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0x0600007f,
 		data: 0x02000043,
 		name: "FMADD.D",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			// @TODO: Update fcsr if needed?
 			let f = parse_format_r2(word);
@@ -2556,6 +2612,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0xfe00007f,
 		data: 0x12000053,
 		name: "FMUL.D",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			// @TODO: Update fcsr if needed?
 			let f = parse_format_r(word);
@@ -2568,6 +2625,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0xfff0707f,
 		data: 0xf2000053,
 		name: "FMV.D.X",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_r(word);
 			cpu.f[f.rd] = f64::from_bits(cpu.x[f.rs1] as u64);
@@ -2579,6 +2637,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0xfff0707f,
 		data: 0xe2000053,
 		name: "FMV.X.D",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_r(word);
 			cpu.x[f.rd] = cpu.f[f.rs1].to_bits() as i64;
@@ -2590,6 +2649,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0xfff0707f,
 		data: 0xe0000053,
 		name: "FMV.X.W",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_r(word);
 			cpu.x[f.rd] = cpu.f[f.rs1].to_bits() as i32 as i64;
@@ -2601,6 +2661,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0xfff0707f,
 		data: 0xf0000053,
 		name: "FMV.W.X",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_r(word);
 			cpu.f[f.rd] = f64::from_bits(cpu.x[f.rs1] as u32 as u64);
@@ -2612,6 +2673,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0x0600007f,
 		data: 0x0200004b,
 		name: "FNMSUB.D",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_r2(word);
 			cpu.f[f.rd] = -(cpu.f[f.rs1] * cpu.f[f.rs2]) + cpu.f[f.rs3];
@@ -2623,6 +2685,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0x0000707f,
 		data: 0x00003027,
 		name: "FSD",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_s(word);
 			cpu.mmu.store_doubleword(
@@ -2636,6 +2699,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0xfe00707f,
 		data: 0x22000053,
 		name: "FSGNJ.D",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_r(word);
 			let rs1_bits = cpu.f[f.rs1].to_bits();
@@ -2650,6 +2714,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0xfe00707f,
 		data: 0x22002053,
 		name: "FSGNJX.D",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_r(word);
 			let rs1_bits = cpu.f[f.rs1].to_bits();
@@ -2664,6 +2729,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0xfe00007f,
 		data: 0x0a000053,
 		name: "FSUB.D",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_r(word);
 			// @TODO: Update fcsr if needed?
@@ -2676,6 +2742,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0x0000707f,
 		data: 0x00002027,
 		name: "FSW",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_s(word);
 			cpu.mmu.store_word(
@@ -2689,6 +2756,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0x0000007f,
 		data: 0x0000006f,
 		name: "JAL",
+		cycles: 10,
 		operation: |cpu, word, address| {
 			let f = parse_format_j(word);
 			cpu.x[f.rd] = cpu.sign_extend(cpu.pc as i64);
@@ -2701,6 +2769,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0x0000707f,
 		data: 0x00000067,
 		name: "JALR",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_i(word);
 			let tmp = cpu.sign_extend(cpu.pc as i64);
@@ -2727,6 +2796,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0x0000707f,
 		data: 0x00000003,
 		name: "LB",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_i(word);
 			cpu.x[f.rd] = match cpu.mmu.load(cpu.x[f.rs1].wrapping_add(f.imm) as u64) {
@@ -2741,6 +2811,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0x0000707f,
 		data: 0x00004003,
 		name: "LBU",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_i(word);
 			cpu.x[f.rd] = match cpu.mmu.load(cpu.x[f.rs1].wrapping_add(f.imm) as u64) {
@@ -2755,6 +2826,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0x0000707f,
 		data: 0x00003003,
 		name: "LD",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_i(word);
 			cpu.x[f.rd] = match cpu
@@ -2772,6 +2844,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0x0000707f,
 		data: 0x00001003,
 		name: "LH",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_i(word);
 			cpu.x[f.rd] = match cpu
@@ -2789,6 +2862,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0x0000707f,
 		data: 0x00005003,
 		name: "LHU",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_i(word);
 			cpu.x[f.rd] = match cpu
@@ -2806,6 +2880,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0xf9f0707f,
 		data: 0x1000302f,
 		name: "LR.D",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_r(word);
 			// @TODO: Implement properly
@@ -2825,6 +2900,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0xf9f0707f,
 		data: 0x1000202f,
 		name: "LR.W",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_r(word);
 			// @TODO: Implement properly
@@ -2844,6 +2920,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0x0000007f,
 		data: 0x00000037,
 		name: "LUI",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_u(word);
 			cpu.x[f.rd] = f.imm as i64;
@@ -2855,6 +2932,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0x0000707f,
 		data: 0x00002003,
 		name: "LW",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_i(word);
 			cpu.x[f.rd] = match cpu.mmu.load_word(cpu.x[f.rs1].wrapping_add(f.imm) as u64) {
@@ -2869,6 +2947,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0x0000707f,
 		data: 0x00006003,
 		name: "LWU",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_i(word);
 			cpu.x[f.rd] = match cpu.mmu.load_word(cpu.x[f.rs1].wrapping_add(f.imm) as u64) {
@@ -2883,6 +2962,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0xfe00707f,
 		data: 0x02000033,
 		name: "MUL",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_r(word);
 			cpu.x[f.rd] = cpu.sign_extend(cpu.x[f.rs1].wrapping_mul(cpu.x[f.rs2]));
@@ -2894,6 +2974,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0xfe00707f,
 		data: 0x02001033,
 		name: "MULH",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_r(word);
 			cpu.x[f.rd] = match cpu.xlen {
@@ -2908,6 +2989,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0xfe00707f,
 		data: 0x02003033,
 		name: "MULHU",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_r(word);
 			cpu.x[f.rd] = match cpu.xlen {
@@ -2927,6 +3009,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0xfe00707f,
 		data: 0x02002033,
 		name: "MULHSU",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_r(word);
 			cpu.x[f.rd] = match cpu.xlen {
@@ -2945,6 +3028,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0xfe00707f,
 		data: 0x0200003b,
 		name: "MULW",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_r(word);
 			cpu.x[f.rd] =
@@ -2957,6 +3041,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0xffffffff,
 		data: 0x30200073,
 		name: "MRET",
+		cycles: 10,
 		operation: |cpu, _word, _address| {
 			cpu.pc = match cpu.read_csr(CSR_MEPC_ADDRESS) {
 				Ok(data) => data,
@@ -2988,6 +3073,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0xfe00707f,
 		data: 0x00006033,
 		name: "OR",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_r(word);
 			cpu.x[f.rd] = cpu.sign_extend(cpu.x[f.rs1] | cpu.x[f.rs2]);
@@ -2999,6 +3085,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0x0000707f,
 		data: 0x00006013,
 		name: "ORI",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_i(word);
 			cpu.x[f.rd] = cpu.sign_extend(cpu.x[f.rs1] | f.imm);
@@ -3010,6 +3097,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0xfe00707f,
 		data: 0x02006033,
 		name: "REM",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_r(word);
 			let dividend = cpu.x[f.rs1];
@@ -3029,6 +3117,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0xfe00707f,
 		data: 0x02007033,
 		name: "REMU",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_r(word);
 			let dividend = cpu.unsigned_data(cpu.x[f.rs1]);
@@ -3045,6 +3134,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0xfe00707f,
 		data: 0x0200703b,
 		name: "REMUW",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_r(word);
 			let dividend = cpu.x[f.rs1] as u32;
@@ -3061,6 +3151,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0xfe00707f,
 		data: 0x0200603b,
 		name: "REMW",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_r(word);
 			let dividend = cpu.x[f.rs1] as i32;
@@ -3080,6 +3171,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0x0000707f,
 		data: 0x00000023,
 		name: "SB",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_s(word);
 			cpu.mmu
@@ -3091,6 +3183,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0xf800707f,
 		data: 0x1800302f,
 		name: "SC.D",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_r(word);
 			// @TODO: Implement properly
@@ -3115,6 +3208,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0xf800707f,
 		data: 0x1800202f,
 		name: "SC.W",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_r(word);
 			// @TODO: Implement properly
@@ -3136,6 +3230,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0x0000707f,
 		data: 0x00003023,
 		name: "SD",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_s(word);
 			cpu.mmu
@@ -3147,6 +3242,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0xfe007fff,
 		data: 0x12000073,
 		name: "SFENCE.VMA",
+		cycles: 10,
 		operation: |_cpu, _word, _address| {
 			// Do nothing?
 			Ok(())
@@ -3157,6 +3253,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0x0000707f,
 		data: 0x00001023,
 		name: "SH",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_s(word);
 			cpu.mmu
@@ -3168,6 +3265,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0xfe00707f,
 		data: 0x00001033,
 		name: "SLL",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_r(word);
 			cpu.x[f.rd] = cpu.sign_extend(cpu.x[f.rs1].wrapping_shl(cpu.x[f.rs2] as u32));
@@ -3179,6 +3277,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0xfc00707f,
 		data: 0x00001013,
 		name: "SLLI",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_r(word);
 			let mask = match cpu.xlen {
@@ -3195,6 +3294,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0xfe00707f,
 		data: 0x0000101b,
 		name: "SLLIW",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_r(word);
 			let shamt = f.rs2 as u32;
@@ -3207,6 +3307,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0xfe00707f,
 		data: 0x0000103b,
 		name: "SLLW",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_r(word);
 			cpu.x[f.rd] = (cpu.x[f.rs1] as u32).wrapping_shl(cpu.x[f.rs2] as u32) as i32 as i64;
@@ -3218,6 +3319,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0xfe00707f,
 		data: 0x00002033,
 		name: "SLT",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_r(word);
 			cpu.x[f.rd] = match cpu.x[f.rs1] < cpu.x[f.rs2] {
@@ -3232,6 +3334,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0x0000707f,
 		data: 0x00002013,
 		name: "SLTI",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_i(word);
 			cpu.x[f.rd] = match cpu.x[f.rs1] < f.imm {
@@ -3246,6 +3349,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0x0000707f,
 		data: 0x00003013,
 		name: "SLTIU",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_i(word);
 			cpu.x[f.rd] = match cpu.unsigned_data(cpu.x[f.rs1]) < cpu.unsigned_data(f.imm) {
@@ -3260,6 +3364,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0xfe00707f,
 		data: 0x00003033,
 		name: "SLTU",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_r(word);
 			cpu.x[f.rd] = match cpu.unsigned_data(cpu.x[f.rs1]) < cpu.unsigned_data(cpu.x[f.rs2]) {
@@ -3274,6 +3379,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0xfe00707f,
 		data: 0x40005033,
 		name: "SRA",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_r(word);
 			cpu.x[f.rd] = cpu.sign_extend(cpu.x[f.rs1].wrapping_shr(cpu.x[f.rs2] as u32));
@@ -3285,6 +3391,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0xfc00707f,
 		data: 0x40005013,
 		name: "SRAI",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_r(word);
 			let mask = match cpu.xlen {
@@ -3301,6 +3408,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0xfc00707f,
 		data: 0x4000501b,
 		name: "SRAIW",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_r(word);
 			let shamt = ((word >> 20) & 0x1f) as u32;
@@ -3313,6 +3421,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0xfe00707f,
 		data: 0x4000503b,
 		name: "SRAW",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_r(word);
 			cpu.x[f.rd] = (cpu.x[f.rs1] as i32).wrapping_shr(cpu.x[f.rs2] as u32) as i64;
@@ -3324,6 +3433,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0xffffffff,
 		data: 0x10200073,
 		name: "SRET",
+		cycles: 10,
 		operation: |cpu, _word, _address| {
 			// @TODO: Throw error if higher privilege return instruction is executed
 			cpu.pc = match cpu.read_csr(CSR_SEPC_ADDRESS) {
@@ -3355,6 +3465,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0xfe00707f,
 		data: 0x00005033,
 		name: "SRL",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_r(word);
 			cpu.x[f.rd] = cpu.sign_extend(
@@ -3369,6 +3480,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0xfc00707f,
 		data: 0x00005013,
 		name: "SRLI",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_r(word);
 			let mask = match cpu.xlen {
@@ -3385,6 +3497,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0xfc00707f,
 		data: 0x0000501b,
 		name: "SRLIW",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_r(word);
 			let mask = match cpu.xlen {
@@ -3401,6 +3514,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0xfe00707f,
 		data: 0x0000503b,
 		name: "SRLW",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_r(word);
 			cpu.x[f.rd] = (cpu.x[f.rs1] as u32).wrapping_shr(cpu.x[f.rs2] as u32) as i32 as i64;
@@ -3412,6 +3526,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0xfe00707f,
 		data: 0x40000033,
 		name: "SUB",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_r(word);
 			cpu.x[f.rd] = cpu.sign_extend(cpu.x[f.rs1].wrapping_sub(cpu.x[f.rs2]));
@@ -3423,6 +3538,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0xfe00707f,
 		data: 0x4000003b,
 		name: "SUBW",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_r(word);
 			cpu.x[f.rd] = cpu.x[f.rs1].wrapping_sub(cpu.x[f.rs2]) as i32 as i64;
@@ -3434,6 +3550,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0x0000707f,
 		data: 0x00002023,
 		name: "SW",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_s(word);
 			cpu.mmu
@@ -3445,6 +3562,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0xffffffff,
 		data: 0x00200073,
 		name: "URET",
+		cycles: 10,
 		operation: |_cpu, _word, _address| {
 			// @TODO: Implement
 			panic!("URET instruction is not implemented yet.");
@@ -3455,6 +3573,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0xffffffff,
 		data: 0x10500073,
 		name: "WFI",
+		cycles: 10,
 		operation: |cpu, _word, _address| {
 			cpu.wfi = true;
 			Ok(())
@@ -3465,6 +3584,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0xfe00707f,
 		data: 0x00004033,
 		name: "XOR",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_r(word);
 			cpu.x[f.rd] = cpu.sign_extend(cpu.x[f.rs1] ^ cpu.x[f.rs2]);
@@ -3476,6 +3596,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0x0000707f,
 		data: 0x00004013,
 		name: "XORI",
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_i(word);
 			cpu.x[f.rd] = cpu.sign_extend(cpu.x[f.rs1] ^ f.imm);
