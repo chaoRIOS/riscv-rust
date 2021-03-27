@@ -6,3 +6,4 @@ wasm/Cargo.lock
 wasm/target
 screenshots/
 *dump
+*elf

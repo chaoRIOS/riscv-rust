@@ -65,7 +65,7 @@ pub struct Cpu {
 	pub f: [f64; 32],
 	pub pc: u64,
 	pub csr: [u64; CSR_CAPACITY],
-	pub instruction_buffer: [u32; 64],
+	pub instruction_buffer: Vec<u32>,
 	pub mmu: Mmu,
 	pub reservation: u64, // @TODO: Should support multiple address reservations
 	pub is_reservation_set: bool,
@@ -220,7 +220,7 @@ impl Cpu {
 			x: [0; 32],
 			f: [0.0; 32],
 			pc: 0,
-			instruction_buffer: [0u32; 64],
+			instruction_buffer: Vec::new(),
 			csr: [0; CSR_CAPACITY],
 			mmu: Mmu::new(Xlen::Bit64),
 			reservation: 0,
@@ -336,7 +336,7 @@ impl Cpu {
 	/// [`Instruction`](struct.Instruction.html). Using [`DecodeCache`](struct.DecodeCache.html)
 	/// so if cache hits this method returns the result very quickly.
 	/// The result will be stored to cache.
-	fn decode(&mut self, word: u32) -> Result<&Instruction, ()> {
+	pub fn decode(&mut self, word: u32) -> Result<&Instruction, ()> {
 		match self.decode_and_get_instruction_index(word) {
 			Ok(index) => Ok(&INSTRUCTIONS[index]),
 			Err(()) => Err(()),
@@ -859,7 +859,7 @@ impl Cpu {
 	}
 
 	// @TODO: Optimize
-	fn uncompress(&self, halfword: u32) -> u32 {
+	pub fn uncompress(&self, halfword: u32) -> u32 {
 		let op = halfword & 0x3; // [1:0]
 		let funct3 = (halfword >> 13) & 0x7; // [15:13]
 

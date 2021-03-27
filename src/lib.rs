@@ -72,12 +72,17 @@ impl Emulator {
 	/// Runs program set by `setup_program()`. The emulator won't stop forever.
 	/// * Added our print function.
 	pub fn run_program(&mut self) {
-		let fromhost_addr = 0x80001040;
+		// let fromhost_addr = 0x80001040;
+		let fromhost_addr = 0x80001ea0;
 		loop {
+			// let disas = self.cpu.disassemble_next_instruction();
+			// self.put_bytes_to_terminal(disas.as_bytes());
+			// self.put_bytes_to_terminal(&[10]); // new line
 			let tohost_data_addr = self.cpu.get_mut_mmu().load_word_raw(self.tohost_addr);
 			if tohost_data_addr != 0 {
 				match tohost_data_addr {
 					0..=0x80000000 => {
+						println!("{:x}", tohost_data_addr);
 						break;
 					}
 					_ => {
@@ -212,7 +217,7 @@ impl Emulator {
 			.find_tohost_addr(&program_data_section_headers, &string_table_section_headers)
 		{
 			Some(address) => address,
-			None => 0,
+			None => 0x80001ea8,
 		};
 
 		// Creates symbol - virtual address mapping

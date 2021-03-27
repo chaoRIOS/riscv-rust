@@ -258,6 +258,10 @@ impl Mmu {
 				Ok(p_address) => {
 					// Fast path. All bytes fetched are in the same page so
 					// translating an address only once.
+					let p_address = match p_address > 0xffffffff00000000 {
+						true => p_address & 0x00000000ffffffff,
+						false => p_address,
+					};
 					match width {
 						1 => Ok(self.load_raw(p_address) as u64),
 						2 => Ok(self.load_halfword_raw(p_address) as u64),
@@ -357,6 +361,10 @@ impl Mmu {
 				Ok(p_address) => {
 					// Fast path. All bytes fetched are in the same page so
 					// translating an address only once.
+					let p_address = match p_address > 0xffffffff00000000 {
+						true => p_address & 0x00000000ffffffff,
+						false => p_address,
+					};
 					match width {
 						1 => self.store_raw(p_address, value as u8),
 						2 => self.store_halfword_raw(p_address, value as u16),
