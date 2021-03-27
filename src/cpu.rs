@@ -1,11 +1,8 @@
 extern crate fnv;
 
-use self::fnv::FnvHashMap;
-
 use mmu::{AddressingMode, Mmu};
-use terminal::Terminal;
 
-const CSR_CAPACITY: usize = 4096;
+pub const CSR_CAPACITY: usize = 4096;
 
 const CSR_USTATUS_ADDRESS: u16 = 0x000;
 const CSR_FFLAGS_ADDRESS: u16 = 0x001;
@@ -58,22 +55,22 @@ const MIP_SSIP: u64 = 0x002;
 
 /// Emulates a RISC-V CPU core
 pub struct Cpu {
-	clock: u64,
-	xlen: Xlen,
-	privilege_mode: PrivilegeMode,
-	wfi: bool,
+	pub clock: u64,
+	pub xlen: Xlen,
+	pub privilege_mode: PrivilegeMode,
+	pub wfi: bool,
 	// using only lower 32bits of x, pc, and csr registers
 	// for 32-bit mode
-	x: [i64; 32],
-	f: [f64; 32],
-	pc: u64,
-	csr: [u64; CSR_CAPACITY],
-	mmu: Mmu,
-	reservation: u64, // @TODO: Should support multiple address reservations
-	is_reservation_set: bool,
-	_dump_flag: bool,
-	decode_cache: DecodeCache,
-	unsigned_data_mask: u64,
+	pub x: [i64; 32],
+	pub f: [f64; 32],
+	pub pc: u64,
+	pub csr: [u64; CSR_CAPACITY],
+	pub instruction_buffer: [u32; 64],
+	pub mmu: Mmu,
+	pub reservation: u64, // @TODO: Should support multiple address reservations
+	pub is_reservation_set: bool,
+	pub _dump_flag: bool,
+	pub unsigned_data_mask: u64,
 }
 
 #[derive(Clone)]
@@ -214,10 +211,7 @@ fn get_trap_cause(trap: &Trap, xlen: &Xlen) -> u64 {
 
 impl Cpu {
 	/// Creates a new `Cpu`.
-	///
-	/// # Arguments
-	/// * `Terminal`
-	pub fn new(terminal: Box<dyn Terminal>) -> Self {
+	pub fn new() -> Self {
 		let mut cpu = Cpu {
 			clock: 0,
 			xlen: Xlen::Bit64,
@@ -226,12 +220,12 @@ impl Cpu {
 			x: [0; 32],
 			f: [0.0; 32],
 			pc: 0,
+			instruction_buffer: [0u32; 64],
 			csr: [0; CSR_CAPACITY],
-			mmu: Mmu::new(Xlen::Bit64, terminal),
+			mmu: Mmu::new(Xlen::Bit64),
 			reservation: 0,
 			is_reservation_set: false,
 			_dump_flag: false,
-			decode_cache: DecodeCache::new(),
 			unsigned_data_mask: 0xffffffffffffffff,
 		};
 		cpu.x[0xb] = 0x1020; // I don't know why but Linux boot seems to require this initialization
@@ -343,15 +337,9 @@ impl Cpu {
 	/// so if cache hits this method returns the result very quickly.
 	/// The result will be stored to cache.
 	fn decode(&mut self, word: u32) -> Result<&Instruction, ()> {
-		match self.decode_cache.get(word) {
-			Some(index) => return Ok(&INSTRUCTIONS[index]),
-			None => match self.decode_and_get_instruction_index(word) {
-				Ok(index) => {
-					self.decode_cache.insert(word, index);
-					Ok(&INSTRUCTIONS[index])
-				}
-				Err(()) => Err(()),
-			},
+		match self.decode_and_get_instruction_index(word) {
+			Ok(index) => Ok(&INSTRUCTIONS[index]),
+			Err(()) => Err(()),
 		}
 	}
 
@@ -700,7 +688,7 @@ impl Cpu {
 		true
 	}
 
-	fn fetch(&mut self) -> Result<u32, Trap> {
+	pub fn fetch(&mut self) -> Result<u32, Trap> {
 		let word = match self.mmu.fetch_word(self.pc) {
 			Ok(word) => word,
 			Err(e) => {
@@ -758,7 +746,7 @@ impl Cpu {
 			CSR_SSTATUS_ADDRESS => self.csr[CSR_MSTATUS_ADDRESS as usize] & 0x80000003000de162,
 			CSR_SIE_ADDRESS => self.csr[CSR_MIE_ADDRESS as usize] & 0x222,
 			CSR_SIP_ADDRESS => self.csr[CSR_MIP_ADDRESS as usize] & 0x222,
-			CSR_TIME_ADDRESS => self.mmu.get_clint().read_mtime(),
+			CSR_TIME_ADDRESS => self.csr[CSR_TIME_ADDRESS as usize],
 			_ => self.csr[address as usize],
 		}
 	}
@@ -796,7 +784,8 @@ impl Cpu {
 					.update_mstatus(self.read_csr_raw(CSR_MSTATUS_ADDRESS));
 			}
 			CSR_TIME_ADDRESS => {
-				self.mmu.get_mut_clint().write_mtime(value);
+				// self.mmu.get_mut_clint().write_mtime(value);
+				self.csr[address as usize] = value;
 			}
 			_ => {
 				self.csr[address as usize] = value;
@@ -1404,11 +1393,6 @@ impl Cpu {
 	/// Returns mutable `Mmu`
 	pub fn get_mut_mmu(&mut self) -> &mut Mmu {
 		&mut self.mmu
-	}
-
-	/// Returns mutable `Terminal`
-	pub fn get_mut_terminal(&mut self) -> &mut Box<dyn Terminal> {
-		self.mmu.get_mut_uart().get_mut_terminal()
 	}
 }
 
@@ -3605,599 +3589,3 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		disassemble: dump_format_i,
 	},
 ];
-
-/// The number of results [`DecodeCache`](struct.DecodeCache.html) holds.
-/// You need to carefully choose the number. Too small number causes
-/// bad cache hit ratio. Too large number causes memory consumption
-/// and host hardware CPU cache memory miss.
-const DECODE_CACHE_ENTRY_NUM: usize = 0x1000;
-
-const INVALID_CACHE_ENTRY: usize = INSTRUCTION_NUM;
-const NULL_ENTRY: usize = DECODE_CACHE_ENTRY_NUM;
-
-/// `DecodeCache` provides a cache system for instruction decoding.
-/// It holds the recent [`DECODE_CACHE_ENTRY_NUM`](constant.DECODE_CACHE_ENTRY_NUM.html)
-/// instruction decode results. If it has a cache (called "hit") for passed
-/// word data, it returns decoding result very quickly. Decoding is one of the
-/// slowest parts in CPU. This cache system improves the CPU processing speed
-/// by skipping decoding. Especially it should work well for loop. It is said
-/// that some loops in a program consume the majority of time then this cache
-/// system is expected to reduce the decoding time very well.
-///
-/// This cache system is based on LRU algorithm, and consists of a hash map and
-/// a linked list. Linked list is for LRU, front means recently used and back
-/// means least recently used. A content in hash map points to an entry in the
-/// linked list. This is the key to achieve computing in O(1).
-///
-// @TODO: Write performance benchmark test to confirm this cache actually
-//        improves the speed.
-struct DecodeCache {
-	/// Holds mappings from word instruction data to an index of `entries`
-	/// pointing to the entry having the decoding result. Containing the word
-	/// means cache hit.
-	hash_map: FnvHashMap<u32, usize>,
-
-	/// Holds the entries [`DecodeCacheEntry`](struct.DecodeCacheEntry.html)
-	/// forming linked list.
-	entries: Vec<DecodeCacheEntry>,
-
-	/// An index of `entries` pointing to the head entry in the linked list
-	front_index: usize,
-
-	/// An index of `entries` pointing to the tail entry in the linked list
-	back_index: usize,
-
-	/// Cache hit count for debugging purpose
-	hit_count: u64,
-
-	/// Cache miss count for debugging purpose
-	miss_count: u64,
-}
-
-impl DecodeCache {
-	/// Creates a new `DecodeCache`.
-	fn new() -> Self {
-		// Initialize linked list
-		let mut entries = Vec::new();
-		for i in 0..DECODE_CACHE_ENTRY_NUM {
-			let next_index = match i == DECODE_CACHE_ENTRY_NUM - 1 {
-				true => NULL_ENTRY,
-				false => i + 1,
-			};
-			let prev_index = match i == 0 {
-				true => NULL_ENTRY,
-				false => i - 1,
-			};
-			entries.push(DecodeCacheEntry::new(next_index, prev_index));
-		}
-
-		DecodeCache {
-			hash_map: FnvHashMap::default(),
-			entries: entries,
-			front_index: 0,
-			back_index: DECODE_CACHE_ENTRY_NUM - 1,
-			hit_count: 0,
-			miss_count: 0,
-		}
-	}
-
-	/// Gets the cached decoding result. If hits this method moves the
-	/// cache entry to front of the linked list and returns an index of
-	/// [`INSTRUCTIONS`](constant.INSTRUCTIONS.html).
-	/// Otherwise returns `None`. This operation should compute in O(1) time.
-	///
-	/// # Arguments
-	/// * `word` word instruction data
-	fn get(&mut self, word: u32) -> Option<usize> {
-		let result = match self.hash_map.get(&word) {
-			Some(index) => {
-				self.hit_count += 1;
-				// Move the entry to front of the list unless it is at front.
-				if self.front_index != *index {
-					let next_index = self.entries[*index].next_index;
-					let prev_index = self.entries[*index].prev_index;
-
-					// Remove the entry from the list
-					if self.back_index == *index {
-						self.back_index = prev_index;
-					} else {
-						self.entries[next_index].prev_index = prev_index;
-					}
-					self.entries[prev_index].next_index = next_index;
-
-					// Push the entry to front
-					self.entries[*index].prev_index = NULL_ENTRY;
-					self.entries[*index].next_index = self.front_index;
-					self.entries[self.front_index].prev_index = *index;
-					self.front_index = *index;
-				}
-				Some(self.entries[*index].instruction_index)
-			}
-			None => {
-				self.miss_count += 1;
-				None
-			}
-		};
-		//println!("Hit:{:X}, Miss:{:X}, Ratio:{}", self.hit_count, self.miss_count,
-		//	(self.hit_count as f64) / (self.hit_count + self.miss_count) as f64);
-		result
-	}
-
-	/// Inserts a new decode result to front of the linked list while removing
-	/// the least recently used result from the list. This operation should
-	/// compute in O(1) time.
-	///
-	/// # Arguments
-	/// * `word`
-	/// * `instruction_index`
-	fn insert(&mut self, word: u32, instruction_index: usize) {
-		let index = self.back_index;
-
-		// Remove the least recently used entry. The entry resource
-		// is reused as new entry.
-		if self.entries[index].instruction_index != INVALID_CACHE_ENTRY {
-			self.hash_map.remove(&self.entries[index].word);
-		}
-		self.back_index = self.entries[index].prev_index;
-		self.entries[self.back_index].next_index = NULL_ENTRY;
-
-		// Push the new entry to front of the linked list
-		self.hash_map.insert(word, index);
-		self.entries[index].prev_index = NULL_ENTRY;
-		self.entries[index].next_index = self.front_index;
-		self.entries[index].word = word;
-		self.entries[index].instruction_index = instruction_index;
-		self.entries[self.front_index].prev_index = index;
-		self.front_index = index;
-	}
-}
-
-/// An entry of linked list managed by [`DecodeCache`](struct.DecodeCache.html).
-/// An entry consists of a mapping from word instruction data to an index of
-/// [`INSTRUCTIONS`](constant.INSTRUCTIONS.html) and next/previous entry index
-/// in the linked list.
-struct DecodeCacheEntry {
-	/// Instruction word data
-	word: u32,
-
-	/// The result of decoding `word`. An index of [`INSTRUCTIONS`](constant.INSTRUCTIONS.html).
-	instruction_index: usize,
-
-	/// Next entry index in the linked list. [`NULL_ENTRY`](constant.NULL_ENTRY.html)
-	/// represents no next entry, meaning the entry is at tail.
-	next_index: usize,
-
-	/// Previous entry index in the linked list. [`NULL_ENTRY`](constant.NULL_ENTRY.html)
-	/// represents no previous entry, meaning the entry is at head.
-	prev_index: usize,
-}
-
-impl DecodeCacheEntry {
-	/// Creates a new entry. Initial `instruction_index` is
-	/// `INVALID_CACHE_ENTRY` meaning the entry is invalid.
-	///
-	/// # Arguments
-	/// * `next_index`
-	/// * `prev_index`
-	fn new(next_index: usize, prev_index: usize) -> Self {
-		DecodeCacheEntry {
-			word: 0,
-			instruction_index: INVALID_CACHE_ENTRY,
-			next_index: next_index,
-			prev_index: prev_index,
-		}
-	}
-}
-
-#[cfg(test)]
-mod test_cpu {
-	use super::*;
-	use mmu::DRAM_BASE;
-	use terminal::DummyTerminal;
-
-	fn create_cpu() -> Cpu {
-		Cpu::new(Box::new(DummyTerminal::new()))
-	}
-
-	#[test]
-	fn initialize() {
-		let _cpu = create_cpu();
-	}
-
-	#[test]
-	fn update_pc() {
-		let mut cpu = create_cpu();
-		assert_eq!(0, cpu.read_pc());
-		cpu.update_pc(1);
-		assert_eq!(1, cpu.read_pc());
-		cpu.update_pc(0xffffffffffffffff);
-		assert_eq!(0xffffffffffffffff, cpu.read_pc());
-	}
-
-	#[test]
-	fn update_xlen() {
-		let mut cpu = create_cpu();
-		assert!(matches!(cpu.xlen, Xlen::Bit64));
-		cpu.update_xlen(Xlen::Bit32);
-		assert!(matches!(cpu.xlen, Xlen::Bit32));
-		cpu.update_xlen(Xlen::Bit64);
-		assert!(matches!(cpu.xlen, Xlen::Bit64));
-		// Note: cpu.update_xlen() updates cpu.mmu.xlen, too.
-		// The test for mmu.xlen should be in Mmu?
-	}
-
-	#[test]
-	fn read_register() {
-		let mut cpu = create_cpu();
-		// Initial register values are 0 other than 0xb th register.
-		// Initial value of 0xb th register is temporal for Linux boot and
-		// I'm not sure if the value is correct. Then skipping so far.
-		for i in 0..31 {
-			if i != 0xb {
-				assert_eq!(0, cpu.read_register(i));
-			}
-		}
-
-		for i in 0..31 {
-			cpu.x[i] = i as i64 + 1;
-		}
-
-		for i in 0..31 {
-			match i {
-				// 0th register is hardwired zero
-				0 => assert_eq!(0, cpu.read_register(i)),
-				_ => assert_eq!(i as i64 + 1, cpu.read_register(i)),
-			}
-		}
-
-		for i in 0..31 {
-			cpu.x[i] = (0xffffffffffffffff - i) as i64;
-		}
-
-		for i in 0..31 {
-			match i {
-				// 0th register is hardwired zero
-				0 => assert_eq!(0, cpu.read_register(i)),
-				_ => assert_eq!(-(i as i64 + 1), cpu.read_register(i)),
-			}
-		}
-
-		// @TODO: Should I test the case where the argument equals to or is
-		// greater than 32?
-	}
-
-	#[test]
-	fn tick() {
-		let mut cpu = create_cpu();
-		cpu.get_mut_mmu().init_memory(4);
-		cpu.update_pc(DRAM_BASE);
-
-		// Write non-compressed "addi x1, x1, 1" instruction
-		match cpu.get_mut_mmu().store_word(DRAM_BASE, 0x00108093) {
-			Ok(()) => {}
-			Err(_e) => panic!("Failed to store"),
-		};
-		// Write compressed "addi x8, x0, 8" instruction
-		match cpu.get_mut_mmu().store_word(DRAM_BASE + 4, 0x20) {
-			Ok(()) => {}
-			Err(_e) => panic!("Failed to store"),
-		};
-
-		cpu.tick();
-
-		assert_eq!(DRAM_BASE + 4, cpu.read_pc());
-		assert_eq!(1, cpu.read_register(1));
-
-		cpu.tick();
-
-		assert_eq!(DRAM_BASE + 6, cpu.read_pc());
-		assert_eq!(8, cpu.read_register(8));
-	}
-
-	#[test]
-	fn tick_operate() {
-		let mut cpu = create_cpu();
-		cpu.get_mut_mmu().init_memory(4);
-		cpu.update_pc(DRAM_BASE);
-		// write non-compressed "addi a0, a0, 12" instruction
-		match cpu.get_mut_mmu().store_word(DRAM_BASE, 0xc50513) {
-			Ok(()) => {}
-			Err(_e) => panic!("Failed to store"),
-		};
-		assert_eq!(DRAM_BASE, cpu.read_pc());
-		assert_eq!(0, cpu.read_register(10));
-		match cpu.tick_operate() {
-			Ok(()) => {}
-			Err(_e) => panic!("tick_operate() unexpectedly did panic"),
-		};
-		// .tick_operate() increments the program counter by 4 for
-		// non-compressed instruction.
-		assert_eq!(DRAM_BASE + 4, cpu.read_pc());
-		// "addi a0, a0, a12" instruction writes 12 to a0 register.
-		assert_eq!(12, cpu.read_register(10));
-		// @TODO: Test compressed instruction operation
-	}
-
-	#[test]
-	fn fetch() {
-		// .fetch() reads four bytes from the memory
-		// at the address the program counter points to.
-		// .fetch() doesn't increment the program counter.
-		// .tick_operate() does.
-		let mut cpu = create_cpu();
-		cpu.get_mut_mmu().init_memory(4);
-		cpu.update_pc(DRAM_BASE);
-		match cpu.get_mut_mmu().store_word(DRAM_BASE, 0xaaaaaaaa) {
-			Ok(()) => {}
-			Err(_e) => panic!("Failed to store"),
-		};
-		match cpu.fetch() {
-			Ok(data) => assert_eq!(0xaaaaaaaa, data),
-			Err(_e) => panic!("Failed to fetch"),
-		};
-		match cpu.get_mut_mmu().store_word(DRAM_BASE, 0x55555555) {
-			Ok(()) => {}
-			Err(_e) => panic!("Failed to store"),
-		};
-		match cpu.fetch() {
-			Ok(data) => assert_eq!(0x55555555, data),
-			Err(_e) => panic!("Failed to fetch"),
-		};
-		// @TODO: Write test cases where Trap happens
-	}
-
-	#[test]
-	fn decode() {
-		let mut cpu = create_cpu();
-		// 0x13 is addi instruction
-		match cpu.decode(0x13) {
-			Ok(inst) => assert_eq!(inst.name, "ADDI"),
-			Err(_e) => panic!("Failed to decode"),
-		};
-		// .decode() returns error for invalid word data.
-		match cpu.decode(0x0) {
-			Ok(_inst) => panic!("Unexpectedly succeeded in decoding"),
-			Err(()) => assert!(true),
-		};
-		// @TODO: Should I test all instructions?
-	}
-
-	#[test]
-	fn uncompress() {
-		let mut cpu = create_cpu();
-		// .uncompress() doesn't directly return an instruction but
-		// it returns uncompressed word. Then you need to call .decode().
-		match cpu.decode(cpu.uncompress(0x20)) {
-			Ok(inst) => assert_eq!(inst.name, "ADDI"),
-			Err(_e) => panic!("Failed to decode"),
-		};
-		// @TODO: Should I test all compressed instructions?
-	}
-
-	#[test]
-	fn wfi() {
-		let wfi_instruction = 0x10500073;
-		let mut cpu = create_cpu();
-		// Just in case
-		match cpu.decode(wfi_instruction) {
-			Ok(inst) => assert_eq!(inst.name, "WFI"),
-			Err(_e) => panic!("Failed to decode"),
-		};
-		cpu.get_mut_mmu().init_memory(4);
-		cpu.update_pc(DRAM_BASE);
-		// write WFI instruction
-		match cpu.get_mut_mmu().store_word(DRAM_BASE, wfi_instruction) {
-			Ok(()) => {}
-			Err(_e) => panic!("Failed to store"),
-		};
-		cpu.tick();
-		assert_eq!(DRAM_BASE + 4, cpu.read_pc());
-		for _i in 0..10 {
-			// Until interrupt happens, .tick() does nothing
-			// @TODO: Check accurately that the state is unchanged
-			cpu.tick();
-			assert_eq!(DRAM_BASE + 4, cpu.read_pc());
-		}
-		// Machine timer interrupt
-		cpu.write_csr_raw(CSR_MIE_ADDRESS, MIP_MTIP);
-		cpu.write_csr_raw(CSR_MIP_ADDRESS, MIP_MTIP);
-		cpu.write_csr_raw(CSR_MSTATUS_ADDRESS, 0x8);
-		cpu.write_csr_raw(CSR_MTVEC_ADDRESS, 0x0);
-		cpu.tick();
-		// Interrupt happened and moved to handler
-		assert_eq!(0, cpu.read_pc());
-	}
-
-	#[test]
-	fn interrupt() {
-		let handler_vector = 0x10000000;
-		let mut cpu = create_cpu();
-		cpu.get_mut_mmu().init_memory(4);
-		// Write non-compressed "addi x0, x0, 1" instruction
-		match cpu.get_mut_mmu().store_word(DRAM_BASE, 0x00100013) {
-			Ok(()) => {}
-			Err(_e) => panic!("Failed to store"),
-		};
-		cpu.update_pc(DRAM_BASE);
-
-		// Machine timer interrupt but mie in mstatus is not enabled yet
-		cpu.write_csr_raw(CSR_MIE_ADDRESS, MIP_MTIP);
-		cpu.write_csr_raw(CSR_MIP_ADDRESS, MIP_MTIP);
-		cpu.write_csr_raw(CSR_MTVEC_ADDRESS, handler_vector);
-
-		cpu.tick();
-
-		// Interrupt isn't caught because mie is disabled
-		assert_eq!(DRAM_BASE + 4, cpu.read_pc());
-
-		cpu.update_pc(DRAM_BASE);
-		// Enable mie in mstatus
-		cpu.write_csr_raw(CSR_MSTATUS_ADDRESS, 0x8);
-
-		cpu.tick();
-
-		// Interrupt happened and moved to handler
-		assert_eq!(handler_vector, cpu.read_pc());
-
-		// CSR Cause register holds the reason what caused the interrupt
-		assert_eq!(0x8000000000000007, cpu.read_csr_raw(CSR_MCAUSE_ADDRESS));
-
-		// @TODO: Test post CSR status register
-		// @TODO: Test xIE bit in CSR status register
-		// @TODO: Test privilege levels
-		// @TODO: Test delegation
-		// @TODO: Test vector type handlers
-	}
-
-	#[test]
-	fn exception() {
-		let handler_vector = 0x10000000;
-		let mut cpu = create_cpu();
-		cpu.get_mut_mmu().init_memory(4);
-		// Write ECALL instruction
-		match cpu.get_mut_mmu().store_word(DRAM_BASE, 0x00000073) {
-			Ok(()) => {}
-			Err(_e) => panic!("Failed to store"),
-		};
-		cpu.write_csr_raw(CSR_MTVEC_ADDRESS, handler_vector);
-		cpu.update_pc(DRAM_BASE);
-
-		cpu.tick();
-
-		// Interrupt happened and moved to handler
-		assert_eq!(handler_vector, cpu.read_pc());
-
-		// CSR Cause register holds the reason what caused the trap
-		assert_eq!(0xb, cpu.read_csr_raw(CSR_MCAUSE_ADDRESS));
-
-		// @TODO: Test post CSR status register
-		// @TODO: Test privilege levels
-		// @TODO: Test delegation
-		// @TODO: Test vector type handlers
-	}
-
-	#[test]
-	fn hardocded_zero() {
-		let mut cpu = create_cpu();
-		cpu.get_mut_mmu().init_memory(8);
-		cpu.update_pc(DRAM_BASE);
-
-		// Write non-compressed "addi x0, x0, 1" instruction
-		match cpu.get_mut_mmu().store_word(DRAM_BASE, 0x00100013) {
-			Ok(()) => {}
-			Err(_e) => panic!("Failed to store"),
-		};
-		// Write non-compressed "addi x1, x1, 1" instruction
-		match cpu.get_mut_mmu().store_word(DRAM_BASE + 4, 0x00108093) {
-			Ok(()) => {}
-			Err(_e) => panic!("Failed to store"),
-		};
-
-		// Test x0
-		assert_eq!(0, cpu.read_register(0));
-		cpu.tick(); // Execute  "addi x0, x0, 1"
-			// x0 is still zero because it's hardcoded zero
-		assert_eq!(0, cpu.read_register(0));
-
-		// Test x1
-		assert_eq!(0, cpu.read_register(1));
-		cpu.tick(); // Execute  "addi x1, x1, 1"
-			// x1 is not hardcoded zero
-		assert_eq!(1, cpu.read_register(1));
-	}
-
-	#[test]
-	fn disassemble_next_instruction() {
-		let mut cpu = create_cpu();
-		cpu.get_mut_mmu().init_memory(4);
-		cpu.update_pc(DRAM_BASE);
-
-		// Write non-compressed "addi x0, x0, 1" instruction
-		match cpu.get_mut_mmu().store_word(DRAM_BASE, 0x00100013) {
-			Ok(()) => {}
-			Err(_e) => panic!("Failed to store"),
-		};
-
-		assert_eq!(
-			"PC:0000000080000000 00100013 ADDI zero:0,zero:0,1",
-			cpu.disassemble_next_instruction()
-		);
-
-		// No effect to PC
-		assert_eq!(DRAM_BASE, cpu.read_pc());
-	}
-}
-
-#[cfg(test)]
-
-mod test_decode_cache {
-	use super::*;
-
-	#[test]
-	fn initialize() {
-		let _cache = DecodeCache::new();
-	}
-
-	#[test]
-	fn insert() {
-		let mut cache = DecodeCache::new();
-		cache.insert(0, 0);
-	}
-
-	#[test]
-	fn get() {
-		let mut cache = DecodeCache::new();
-		cache.insert(1, 2);
-
-		// Cache hit test
-		match cache.get(1) {
-			Some(index) => assert_eq!(2, index),
-			None => panic!("Unexpected cache miss"),
-		};
-
-		// Cache miss test
-		match cache.get(2) {
-			Some(_index) => panic!("Unexpected cache hit"),
-			None => {}
-		};
-	}
-
-	#[test]
-	fn lru() {
-		let mut cache = DecodeCache::new();
-		cache.insert(0, 1);
-
-		match cache.get(0) {
-			Some(index) => assert_eq!(1, index),
-			None => panic!("Unexpected cache miss"),
-		};
-
-		for i in 1..DECODE_CACHE_ENTRY_NUM + 1 {
-			cache.insert(i as u32, i + 1);
-		}
-
-		// The oldest entry should have been removed because of the overflow
-		match cache.get(0) {
-			Some(_index) => panic!("Unexpected cache hit"),
-			None => {}
-		};
-
-		// With this .get(), the entry with the word "1" moves to the tail of the list
-		// and the entry with the word "2" becomes the oldest entry.
-		match cache.get(1) {
-			Some(index) => assert_eq!(2, index),
-			None => {}
-		};
-
-		// The oldest entry with the word "2" will be removed due to the overflow
-		cache.insert(
-			DECODE_CACHE_ENTRY_NUM as u32 + 1,
-			DECODE_CACHE_ENTRY_NUM + 2,
-		);
-
-		match cache.get(2) {
-			Some(_index) => panic!("Unexpected cache hit"),
-			None => {}
-		};
-	}
-}

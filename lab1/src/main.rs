@@ -1,14 +1,15 @@
 extern crate getopts;
 extern crate riscv_emu_rust;
 
-mod dummy_terminal;
+pub mod pkg;
 
-use dummy_terminal::DummyTerminal;
 use riscv_emu_rust::cpu::Xlen;
 use riscv_emu_rust::Emulator;
 
 use std::fs::File;
 use std::io::Read;
+
+use pkg::*;
 
 fn main() -> std::io::Result<()> {
 	let mut elf_file =
@@ -17,11 +18,13 @@ fn main() -> std::io::Result<()> {
 	let mut elf_contents = vec![];
 	elf_file.read_to_end(&mut elf_contents)?;
 
-	let mut emulator = Emulator::new(Box::new(DummyTerminal::new()));
-	emulator.setup_program(elf_contents);
-	emulator.update_xlen(Xlen::Bit64);
+	unsafe {
+		// let mut emulator = Emulator::new();
+		EMULATOR.setup_program(elf_contents);
+		EMULATOR.update_xlen(Xlen::Bit64);
 
-	emulator.myrun();
+		EMULATOR.run_program();
+	}
 	// emulator.run_program();
 	Ok(())
 }

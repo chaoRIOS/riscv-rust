@@ -1,15 +1,13 @@
 /// Emulates main memory.
 pub struct Memory {
 	/// Memory content
-	data: Vec<u64>
+	pub data: Vec<u64>,
 }
 
 impl Memory {
 	/// Creates a new `Memory`
 	pub fn new() -> Self {
-		Memory {
-			data: vec![]
-		}
+		Memory { data: vec![] }
 	}
 
 	/// Initializes memory content.
@@ -22,7 +20,6 @@ impl Memory {
 			self.data.push(0);
 		}
 	}
-	
 	/// Reads a byte from memory.
 	///
 	/// # Arguments
@@ -70,7 +67,8 @@ impl Memory {
 			let index = (address >> 3) as usize;
 			self.data[index]
 		} else if (address % 4) == 0 {
-			(self.read_word(address) as u64) | ((self.read_word(address.wrapping_add(4)) as u64) << 4)
+			(self.read_word(address) as u64)
+				| ((self.read_word(address.wrapping_add(4)) as u64) << 4)
 		} else {
 			self.read_bytes(address, 8)
 		}
@@ -164,6 +162,6 @@ impl Memory {
 	/// # Arguments
 	/// * `address`
 	pub fn validate_address(&self, address: u64) -> bool {
-		return (address as usize) < self.data.len()
+		return (address as usize) < self.data.len();
 	}
 }

@@ -5,20 +5,15 @@ const PROGRAM_MEMORY_CAPACITY: u64 = 1024 * 1024 * 128; // big enough to run Lin
 extern crate fnv;
 use self::fnv::FnvHashMap;
 
-use std::io::{stdout, Write};
 use std::str;
 
 pub mod cpu;
-pub mod default_terminal;
-pub mod device;
 pub mod elf_analyzer;
 pub mod memory;
 pub mod mmu;
-pub mod terminal;
 
 use cpu::{Cpu, Xlen};
 use elf_analyzer::ElfAnalyzer;
-use terminal::Terminal;
 
 /// RISC-V emulator. It emulates RISC-V CPU and peripheral devices.
 ///
@@ -34,32 +29,29 @@ use terminal::Terminal;
 /// emulator.run();
 /// ```
 pub struct Emulator {
-	cpu: Cpu,
+	pub cpu: Cpu,
 
 	/// Stores mapping from symbol to virtual address
-	symbol_map: FnvHashMap<String, u64>,
+	pub symbol_map: Option<FnvHashMap<String, u64>>,
 
 	/// [`riscv-tests`](https://github.com/riscv/riscv-tests) program specific
 	/// properties. Whether the program set by `setup_program()` is
 	/// [`riscv-tests`](https://github.com/riscv/riscv-tests) program.
-	is_test: bool,
+	pub is_test: bool,
 
 	/// [`riscv-tests`](https://github.com/riscv/riscv-tests) specific properties.
 	/// The address where data will be sent to terminal
-	tohost_addr: u64,
+	pub tohost_addr: u64,
 }
 
 impl Emulator {
 	/// Creates a new `Emulator`. [`Terminal`](terminal/trait.Terminal.html)
 	/// is internally used for transferring input/output data to/from `Emulator`.
-	///
-	/// # Arguments
-	/// * `terminal`
-	pub fn new(terminal: Box<dyn Terminal>) -> Self {
+	pub fn new() -> Self {
 		Emulator {
-			cpu: Cpu::new(terminal),
+			cpu: Cpu::new(),
 
-			symbol_map: FnvHashMap::default(),
+			symbol_map: Some(FnvHashMap::default()),
 
 			// These can be updated in setup_program()
 			is_test: false,
@@ -67,10 +59,19 @@ impl Emulator {
 		}
 	}
 
-	/// Runs program set by `setup_program()`.
-	/// * Disassembles every instruction and dumps to terminal
+	/// Runs program set by `setup_program()`. Calls `run_test()` if the program
+	/// is [`riscv-tests`](https://github.com/riscv/riscv-tests).
+	/// Otherwise calls `run_program()`.
+	pub fn run(&mut self) {
+		match self.is_test {
+			true => self.run_test(),
+			false => self.run_program(),
+		};
+	}
+
+	/// Runs program set by `setup_program()`. The emulator won't stop forever.
 	/// * Added our print function.
-	pub fn myrun(&mut self) {
+	pub fn run_program(&mut self) {
 		let fromhost_addr = 0x80001040;
 		loop {
 			let tohost_data_addr = self.cpu.get_mut_mmu().load_word_raw(self.tohost_addr);
@@ -117,23 +118,6 @@ impl Emulator {
 		}
 	}
 
-	/// Runs program set by `setup_program()`. Calls `run_test()` if the program
-	/// is [`riscv-tests`](https://github.com/riscv/riscv-tests).
-	/// Otherwise calls `run_program()`.
-	pub fn run(&mut self) {
-		match self.is_test {
-			true => self.run_test(),
-			false => self.run_program(),
-		};
-	}
-
-	/// Runs program set by `setup_program()`. The emulator won't stop forever.
-	pub fn run_program(&mut self) {
-		loop {
-			self.tick();
-		}
-	}
-
 	/// Method for running [`riscv-tests`](https://github.com/riscv/riscv-tests) program.
 	/// The differences from `run_program()` are
 	/// * Disassembles every instruction and dumps to terminal
@@ -176,7 +160,13 @@ impl Emulator {
 	/// * `bytes`
 	fn put_bytes_to_terminal(&mut self, bytes: &[u8]) {
 		for i in 0..bytes.len() {
-			self.cpu.get_mut_terminal().put_byte(bytes[i]);
+			let str = vec![bytes[i]];
+			match str::from_utf8(&str) {
+				Ok(s) => {
+					print!("{}", s);
+				}
+				Err(_e) => {}
+			};
 		}
 	}
 
@@ -231,10 +221,11 @@ impl Emulator {
 			// Assuming symbols are in the first string table section.
 			// @TODO: What if symbol can be in the second or later string table sections?
 			let map = analyzer.create_symbol_map(&entries, &string_table_section_headers[0]);
+			let mut _symbol_map = FnvHashMap::default();
 			for key in map.keys() {
-				self.symbol_map
-					.insert(key.to_string(), *map.get(key).unwrap());
+				_symbol_map.insert(key.to_string(), *map.get(key).unwrap());
 			}
+			self.symbol_map = Some(_symbol_map);
 		}
 
 		// Detected whether the elf file is riscv-tests.
@@ -274,60 +265,42 @@ impl Emulator {
 	///
 	/// # Arguments
 	/// * `content` Program binary
-	pub fn load_program_for_symbols(&mut self, content: Vec<u8>) {
-		let analyzer = ElfAnalyzer::new(content);
+	// pub fn load_program_for_symbols(&mut self, content: Vec<u8>) {
+	// 	let analyzer = ElfAnalyzer::new(content);
 
-		if !analyzer.validate() {
-			panic!("This file does not seem ELF file");
-		}
+	// 	if !analyzer.validate() {
+	// 		panic!("This file does not seem ELF file");
+	// 	}
 
-		let header = analyzer.read_header();
-		let section_headers = analyzer.read_section_headers(&header);
+	// 	let header = analyzer.read_header();
+	// 	let section_headers = analyzer.read_section_headers(&header);
 
-		let mut program_data_section_headers = vec![];
-		let mut symbol_table_section_headers = vec![];
-		let mut string_table_section_headers = vec![];
+	// 	let mut program_data_section_headers = vec![];
+	// 	let mut symbol_table_section_headers = vec![];
+	// 	let mut string_table_section_headers = vec![];
 
-		for i in 0..section_headers.len() {
-			match section_headers[i].sh_type {
-				1 => program_data_section_headers.push(&section_headers[i]),
-				2 => symbol_table_section_headers.push(&section_headers[i]),
-				3 => string_table_section_headers.push(&section_headers[i]),
-				_ => {}
-			};
-		}
+	// 	for i in 0..section_headers.len() {
+	// 		match section_headers[i].sh_type {
+	// 			1 => program_data_section_headers.push(&section_headers[i]),
+	// 			2 => symbol_table_section_headers.push(&section_headers[i]),
+	// 			3 => string_table_section_headers.push(&section_headers[i]),
+	// 			_ => {}
+	// 		};
+	// 	}
 
-		// Creates symbol - virtual address mapping
-		if string_table_section_headers.len() > 0 {
-			let entries = analyzer.read_symbol_entries(&header, &symbol_table_section_headers);
-			// Assuming symbols are in the first string table section.
-			// @TODO: What if symbol can be in the second or later string table sections?
-			let map = analyzer.create_symbol_map(&entries, &string_table_section_headers[0]);
-			for key in map.keys() {
-				self.symbol_map
-					.insert(key.to_string(), *map.get(key).unwrap());
-			}
-		}
-	}
-
-	/// Sets up filesystem. Use this method if program (e.g. Linux) uses
-	/// filesystem. This method is expected to be called up to only once.
-	///
-	/// # Arguments
-	/// * `content` File system content binary
-	pub fn setup_filesystem(&mut self, content: Vec<u8>) {
-		self.cpu.get_mut_mmu().init_disk(content);
-	}
-
-	/// Sets up device tree. The emulator has default device tree configuration.
-	/// If you want to override it, use this method. This method is expected to
-	/// to be called up to only once.
-	///
-	/// # Arguments
-	/// * `content` DTB content binary
-	pub fn setup_dtb(&mut self, content: Vec<u8>) {
-		self.cpu.get_mut_mmu().init_dtb(content);
-	}
+	// 	// Creates symbol - virtual address mapping
+	// 	if string_table_section_headers.len() > 0 {
+	// 		let entries = analyzer.read_symbol_entries(&header, &symbol_table_section_headers);
+	// 		// Assuming symbols are in the first string table section.
+	// 		// @TODO: What if symbol can be in the second or later string table sections?
+	// 		let map = analyzer.create_symbol_map(&entries, &string_table_section_headers[0]);
+	// 		for key in map.keys() {
+	// 			self.symbol_map
+	// 				.unwrap()
+	// 				.insert(key.to_string(), *map.get(key).unwrap());
+	// 		}
+	// 	}
+	// }
 
 	/// Updates XLEN (the width of an integer register in bits) in CPU.
 	///
@@ -335,21 +308,6 @@ impl Emulator {
 	/// * `xlen`
 	pub fn update_xlen(&mut self, xlen: Xlen) {
 		self.cpu.update_xlen(xlen);
-	}
-
-	/// Enables or disables page cache optimization.
-	/// Page cache optimization is experimental feature.
-	/// See [`Mmu`](./mmu/struct.Mmu.html) for the detail.
-	///
-	/// # Arguments
-	/// * `enabled`
-	pub fn enable_page_cache(&mut self, enabled: bool) {
-		self.cpu.get_mut_mmu().enable_page_cache(enabled);
-	}
-
-	/// Returns mutable reference to `Terminal`.
-	pub fn get_mut_terminal(&mut self) -> &mut Box<dyn Terminal> {
-		self.cpu.get_mut_terminal()
 	}
 
 	/// Returns immutable reference to `Cpu`.
@@ -362,73 +320,14 @@ impl Emulator {
 		&mut self.cpu
 	}
 
-	/// Returns a virtual address corresponding to symbol strings
-	///
-	/// # Arguments
-	/// * `s` Symbol strings
-	pub fn get_addredd_of_symbol(&self, s: &String) -> Option<u64> {
-		match self.symbol_map.get(s) {
-			Some(address) => Some(*address),
-			None => None,
-		}
-	}
-}
-
-#[cfg(test)]
-mod test_emulator {
-	use super::*;
-	use terminal::DummyTerminal;
-
-	fn create_emu() -> Emulator {
-		Emulator::new(Box::new(DummyTerminal::new()))
-	}
-
-	#[test]
-	fn initialize() {
-		let _emu = create_emu();
-	}
-
-	#[test]
-	#[ignore]
-	fn run() {}
-
-	#[test]
-	#[ignore]
-	fn run_program() {}
-
-	#[test]
-	#[ignore]
-	fn run_test() {}
-
-	#[test]
-	#[ignore]
-	fn tick() {}
-
-	#[test]
-	#[ignore]
-	fn setup_program() {}
-
-	#[test]
-	#[ignore]
-	fn load_program_for_symbols() {}
-
-	#[test]
-	#[ignore]
-	fn setup_filesystem() {}
-
-	#[test]
-	#[ignore]
-	fn setup_dtb() {}
-
-	#[test]
-	#[ignore]
-	fn update_xlen() {}
-
-	#[test]
-	#[ignore]
-	fn enable_page_cache() {}
-
-	#[test]
-	#[ignore]
-	fn get_addredd_of_symbol() {}
+	// /// Returns a virtual address corresponding to symbol strings
+	// ///
+	// /// # Arguments
+	// /// * `s` Symbol strings
+	// pub fn get_addredd_of_symbol(&self, s: &String) -> Option<u64> {
+	// 	match self.symbol_map.unwrap().get(s) {
+	// 		Some(address) => Some(*address),
+	// 		None => None,
+	// 	}
+	// }
 }
