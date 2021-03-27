@@ -4,7 +4,7 @@ const PROGRAM_MEMORY_CAPACITY: u64 = 1024 * 1024 * 128; // big enough to run Lin
 
 extern crate fnv;
 use self::fnv::FnvHashMap;
-
+use std::collections::HashMap;
 use std::str;
 
 pub mod cpu;
@@ -33,6 +33,9 @@ pub struct Emulator {
 
 	/// Stores mapping from symbol to virtual address
 	pub symbol_map: Option<FnvHashMap<String, u64>>,
+	pub format_map: Option<HashMap<String, String>>,
+	pub fu_map: Option<HashMap<String, u8>>,
+	pub op_map: Option<HashMap<String, u8>>,
 
 	/// [`riscv-tests`](https://github.com/riscv/riscv-tests) program specific
 	/// properties. Whether the program set by `setup_program()` is
@@ -52,6 +55,9 @@ impl Emulator {
 			cpu: Cpu::new(),
 
 			symbol_map: Some(FnvHashMap::default()),
+			format_map: Some(HashMap::default()),
+			fu_map: Some(HashMap::default()),
+			op_map: Some(HashMap::default()),
 
 			// These can be updated in setup_program()
 			is_test: false,

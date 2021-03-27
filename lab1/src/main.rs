@@ -7,6 +7,7 @@ pub mod pkg;
 
 use riscv_emu_rust::cpu::Xlen;
 
+use std::env;
 use std::fs::File;
 use std::io::Read;
 
@@ -27,8 +28,11 @@ fn run_elf(file_path: &str) -> std::io::Result<()> {
 }
 
 fn main() -> std::io::Result<()> {
+	let args: Vec<String> = env::args().collect();
+	// println!("{:?}", &args[1]);
 	// run_elf("/opt/orv64-merge/rrv64/tb/test_program/benchmarks/dhrystone.riscv")?;
-	run_elf("/home/cwang/work/riscv-rust/lab1/test64.elf")?;
+	run_elf(&args[1])?;
+	// run_elf("/home/cwang/work/riscv-rust/lab1/test64.elf")?;
 	// println!("len:{:}", (ID2IS_LEN / 8) as usize + 1);
 	Ok(())
 }

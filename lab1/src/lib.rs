@@ -6,6 +6,7 @@ use riscv_emu_rust::cpu::*;
 use riscv_emu_rust::memory::*;
 use riscv_emu_rust::mmu::*;
 use riscv_emu_rust::Emulator;
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::Read;
 use std::ptr::NonNull;
@@ -31,6 +32,26 @@ pub unsafe extern "C" fn dpi_fetch_decode(
 
 	if let None = EMULATOR.symbol_map {
 		EMULATOR.symbol_map = Some(FnvHashMap::default());
+		// EMULATOR.format_map = Some(HashMap::default());
+		// EMULATOR.fu_map = Some(HashMap::default());
+		// EMULATOR.op_map = Some(HashMap::default());
+
+		let mut _format_map: HashMap<String, String> = HashMap::default();
+		let mut _fu_map: HashMap<String, u8> = HashMap::default();
+		let mut _op_map: HashMap<String, u8> = HashMap::default();
+		for i in 0..COSIM_INSTRUCTIONS.len() {
+			let mut _instr: &str = COSIM_INSTRUCTIONS[i];
+			let mut _format: &str = COSIM_INSTRUCTIONS_FORMAT[i];
+			let mut _fu: u8 = COSIM_INSTRUCTIONS_FU_T[i].clone();
+			let mut _op: u8 = COSIM_INSTRUCTIONS_FU_OP[i].clone();
+			_format_map.insert(String::from(_instr), String::from(_format));
+			_fu_map.insert(String::from(_instr), _fu);
+			_op_map.insert(String::from(_instr), _op);
+		}
+		EMULATOR.format_map = Some(_format_map);
+		EMULATOR.fu_map = Some(_fu_map);
+		EMULATOR.op_map = Some(_op_map);
+
 		let mut elf_file =
 			match File::open("/opt/orv64-merge/rrv64/tb/test_program/benchmarks/dhrystone.riscv") {
 				Ok(f) => f,
