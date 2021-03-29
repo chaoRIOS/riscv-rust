@@ -1405,6 +1405,12 @@ pub struct Instruction {
 	disassemble: fn(cpu: &mut Cpu, word: u32, address: u64, evaluate: bool) -> String,
 }
 
+impl Instruction {
+	pub fn get_name(&self) -> &str {
+		self.name
+	}
+}
+
 struct FormatB {
 	rs1: usize,
 	rs2: usize,
@@ -1476,13 +1482,13 @@ fn dump_format_csr(cpu: &mut Cpu, word: u32, _address: u64, evaluate: bool) -> S
 	s
 }
 
-struct FormatI {
-	rd: usize,
-	rs1: usize,
-	imm: i64,
+pub struct FormatI {
+	pub rd: usize,
+	pub rs1: usize,
+	pub imm: i64,
 }
 
-fn parse_format_i(word: u32) -> FormatI {
+pub fn parse_format_i(word: u32) -> FormatI {
 	FormatI {
 		rd: ((word >> 7) & 0x1f) as usize,   // [11:7]
 		rs1: ((word >> 15) & 0x1f) as usize, // [19:15]

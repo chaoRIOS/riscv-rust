@@ -222,96 +222,95 @@ pub const COSIM_INSTRUCTIONS_FU_OP: [u8; 75] = [
 
 /// Configurable globals
 // ISA globals
-const XLEN: usize = 64;
-const VLEN: usize = 39;
-const PLEN: usize = 56;
-const REG_ADDR_SIZE: usize = 6;
+pub const XLEN: usize = 64;
+pub const VLEN: usize = 39;
+pub const PLEN: usize = 56;
+pub const REG_ADDR_SIZE: usize = 6;
 // Architectural globals
-const NR_SB_ENTRIES: usize = 8;
-const TRANS_ID_BITS: usize = 3; // log2(NR_SB_ENTRIES)
-const ISSUE_NUM: usize = 2;
+pub const NR_SB_ENTRIES: usize = 8;
+pub const TRANS_ID_BITS: usize = 3; // log2(NR_SB_ENTRIES)
+pub const ISSUE_NUM: usize = 1;
 // Impl globals
-const LEN_FU_T: usize = 4;
-const LEN_FU_OP: usize = 7;
-const LEN_CF_T: usize = 3;
+pub const LEN_FU_T: usize = 4;
+pub const LEN_FU_OP: usize = 7;
+pub const LEN_CF_T: usize = 3;
 
 // FU_T ENUMs
-const FU_T_NONE: u8 = 0;
-const FU_T_LOAD: u8 = 1;
-const FU_T_STORE: u8 = 2;
-const FU_T_ALU: u8 = 3;
-const FU_T_CTRL_FLOW: u8 = 4;
-const FU_T_MULT: u8 = 5;
-const FU_T_CSR: u8 = 6;
+pub const FU_T_NONE: u8 = 0;
+pub const FU_T_LOAD: u8 = 1;
+pub const FU_T_STORE: u8 = 2;
+pub const FU_T_ALU: u8 = 3;
+pub const FU_T_CTRL_FLOW: u8 = 4;
+pub const FU_T_MULT: u8 = 5;
+pub const FU_T_CSR: u8 = 6;
 
 // FU_OP ENUMs
-const FU_OP_ADD: u8 = 0;
-const FU_OP_SUB: u8 = 1;
-const FU_OP_ADDW: u8 = 2;
-const FU_OP_SUBW: u8 = 3;
-const FU_OP_XORL: u8 = 4;
-const FU_OP_ORL: u8 = 5;
-const FU_OP_ANDL: u8 = 6;
-const FU_OP_SRA: u8 = 7;
-const FU_OP_SRL: u8 = 8;
-const FU_OP_SLL: u8 = 9;
-const FU_OP_SRLW: u8 = 10;
-const FU_OP_SLLW: u8 = 11;
-const FU_OP_SRAW: u8 = 12;
-const FU_OP_LTS: u8 = 13;
-const FU_OP_LTU: u8 = 14;
-const FU_OP_GES: u8 = 15;
-const FU_OP_GEU: u8 = 16;
-const FU_OP_EQ: u8 = 17;
-const FU_OP_NE: u8 = 18;
-const FU_OP_JALR: u8 = 19;
-const FU_OP_BRANCH: u8 = 20;
-const FU_OP_SLTS: u8 = 21;
-const FU_OP_SLTU: u8 = 22;
-const FU_OP_MRET: u8 = 23;
-const FU_OP_SRET: u8 = 24;
-const FU_OP_DRET: u8 = 25;
-const FU_OP_ECALL: u8 = 26;
-const FU_OP_WFI: u8 = 27;
-const FU_OP_FENCE: u8 = 28;
-const FU_OP_FENCE_I: u8 = 29;
-const FU_OP_SFENCE_VMA: u8 = 30;
-const FU_OP_CSR_WRITE: u8 = 31;
-const FU_OP_CSR_READ: u8 = 32;
-const FU_OP_CSR_SET: u8 = 33;
-const FU_OP_CSR_CLEAR: u8 = 34;
-const FU_OP_LD: u8 = 35;
-const FU_OP_SD: u8 = 36;
-const FU_OP_LW: u8 = 37;
-const FU_OP_LWU: u8 = 38;
-const FU_OP_SW: u8 = 39;
-const FU_OP_LH: u8 = 40;
-const FU_OP_LHU: u8 = 41;
-const FU_OP_SH: u8 = 42;
-const FU_OP_LB: u8 = 43;
-const FU_OP_SB: u8 = 44;
-const FU_OP_LBU: u8 = 45;
-const FU_OP_MUL: u8 = 46;
-const FU_OP_MULH: u8 = 47;
-const FU_OP_MULHU: u8 = 48;
-const FU_OP_MULHSU: u8 = 49;
-const FU_OP_MULW: u8 = 50;
-const FU_OP_DIV: u8 = 51;
-const FU_OP_DIVU: u8 = 52;
-const FU_OP_DIVW: u8 = 53;
-const FU_OP_DIVUW: u8 = 54;
-const FU_OP_REM: u8 = 55;
-const FU_OP_REMU: u8 = 56;
-const FU_OP_REMW: u8 = 57;
-const FU_OP_REMUW: u8 = 58;
+pub const FU_OP_ADD: u8 = 0;
+pub const FU_OP_SUB: u8 = 1;
+pub const FU_OP_ADDW: u8 = 2;
+pub const FU_OP_SUBW: u8 = 3;
+pub const FU_OP_XORL: u8 = 4;
+pub const FU_OP_ORL: u8 = 5;
+pub const FU_OP_ANDL: u8 = 6;
+pub const FU_OP_SRA: u8 = 7;
+pub const FU_OP_SRL: u8 = 8;
+pub const FU_OP_SLL: u8 = 9;
+pub const FU_OP_SRLW: u8 = 10;
+pub const FU_OP_SLLW: u8 = 11;
+pub const FU_OP_SRAW: u8 = 12;
+pub const FU_OP_LTS: u8 = 13;
+pub const FU_OP_LTU: u8 = 14;
+pub const FU_OP_GES: u8 = 15;
+pub const FU_OP_GEU: u8 = 16;
+pub const FU_OP_EQ: u8 = 17;
+pub const FU_OP_NE: u8 = 18;
+pub const FU_OP_JALR: u8 = 19;
+pub const FU_OP_BRANCH: u8 = 20;
+pub const FU_OP_SLTS: u8 = 21;
+pub const FU_OP_SLTU: u8 = 22;
+pub const FU_OP_MRET: u8 = 23;
+pub const FU_OP_SRET: u8 = 24;
+pub const FU_OP_DRET: u8 = 25;
+pub const FU_OP_ECALL: u8 = 26;
+pub const FU_OP_WFI: u8 = 27;
+pub const FU_OP_FENCE: u8 = 28;
+pub const FU_OP_FENCE_I: u8 = 29;
+pub const FU_OP_SFENCE_VMA: u8 = 30;
+pub const FU_OP_CSR_WRITE: u8 = 31;
+pub const FU_OP_CSR_READ: u8 = 32;
+pub const FU_OP_CSR_SET: u8 = 33;
+pub const FU_OP_CSR_CLEAR: u8 = 34;
+pub const FU_OP_LD: u8 = 35;
+pub const FU_OP_SD: u8 = 36;
+pub const FU_OP_LW: u8 = 37;
+pub const FU_OP_LWU: u8 = 38;
+pub const FU_OP_SW: u8 = 39;
+pub const FU_OP_LH: u8 = 40;
+pub const FU_OP_LHU: u8 = 41;
+pub const FU_OP_SH: u8 = 42;
+pub const FU_OP_LB: u8 = 43;
+pub const FU_OP_SB: u8 = 44;
+pub const FU_OP_LBU: u8 = 45;
+pub const FU_OP_MUL: u8 = 46;
+pub const FU_OP_MULH: u8 = 47;
+pub const FU_OP_MULHU: u8 = 48;
+pub const FU_OP_MULHSU: u8 = 49;
+pub const FU_OP_MULW: u8 = 50;
+pub const FU_OP_DIV: u8 = 51;
+pub const FU_OP_DIVU: u8 = 52;
+pub const FU_OP_DIVW: u8 = 53;
+pub const FU_OP_DIVUW: u8 = 54;
+pub const FU_OP_REM: u8 = 55;
+pub const FU_OP_REMU: u8 = 56;
+pub const FU_OP_REMW: u8 = 57;
+pub const FU_OP_REMUW: u8 = 58;
 
-const CF_T_NO_CF: u8 = 0;
-const CF_T_BRANCH: u8 = 1;
-const CF_T_JUMP: u8 = 2;
-const CF_T_JUMP_R: u8 = 3;
-const CF_T_RETURN: u8 = 4;
+pub const CF_T_NO_CF: u8 = 0;
+pub const CF_T_BRANCH: u8 = 1;
+pub const CF_T_JUMP: u8 = 2;
+pub const CF_T_JUMP_R: u8 = 3;
+pub const CF_T_RETURN: u8 = 4;
 
-#[repr(C, packed)]
 // XLEN * 2 + 1
 pub struct exception_t {
 	pub cause: [bool; XLEN],
@@ -319,14 +318,21 @@ pub struct exception_t {
 	pub valid: bool,
 }
 
-#[repr(C, packed)]
+pub const OFFSET_EXCEPTION_CAUSE: usize = 0;
+pub const OFFSET_EXCEPTION_TVAL: usize = OFFSET_EXCEPTION_CAUSE + XLEN;
+pub const OFFSET_EXCEPTION_VALID: usize = OFFSET_EXCEPTION_TVAL + XLEN;
+pub const LEN_EXCEPTION: usize = OFFSET_EXCEPTION_VALID + 1;
+
 // LEN_CF_T + VLEN
 pub struct branchpredict_sbe_t {
 	pub cf: [bool; LEN_CF_T],
 	pub predict_address: [bool; VLEN],
 }
 
-#[repr(C, packed)]
+pub const OFFSET_BP_CF: usize = 0;
+pub const OFFSET_BP_PREDICT_ADDRESS: usize = OFFSET_BP_CF + LEN_CF_T;
+pub const LEN_BP: usize = OFFSET_BP_PREDICT_ADDRESS + VLEN;
+
 // VLEN + TRANS_ID_BITS + LEN_FU_T + LEN_FU_OP + REG_ADDR_SIZE * 3
 // + XLEN + 4 + (XLEN * 2 + 1) + (LEN_CF_T + VLEN) + 1
 pub struct scoreboard_entry_t {
@@ -347,6 +353,23 @@ pub struct scoreboard_entry_t {
 	pub is_compressed: bool,
 }
 
+pub const OFFSET_PC: usize = 0;
+pub const OFFSET_TRANS_ID: usize = OFFSET_PC + VLEN;
+pub const OFFSET_FU: usize = OFFSET_TRANS_ID + TRANS_ID_BITS;
+pub const OFFSET_OP: usize = OFFSET_FU + LEN_FU_T;
+pub const OFFSET_RS1: usize = OFFSET_OP + LEN_FU_OP;
+pub const OFFSET_RS2: usize = OFFSET_RS1 + REG_ADDR_SIZE;
+pub const OFFSET_RD: usize = OFFSET_RS2 + REG_ADDR_SIZE;
+pub const OFFSET_RESULT: usize = OFFSET_RD + REG_ADDR_SIZE;
+pub const OFFSET_VALID: usize = OFFSET_RESULT + XLEN;
+pub const OFFSET_USE_IMM: usize = OFFSET_VALID + 1;
+pub const OFFSET_USE_ZIMM: usize = OFFSET_USE_IMM + 1;
+pub const OFFSET_USE_PC: usize = OFFSET_USE_ZIMM + 1;
+pub const OFFSET_EX: usize = OFFSET_USE_PC + 1;
+pub const OFFSET_BP: usize = OFFSET_EX + LEN_EXCEPTION;
+pub const OFFSET_IS_COMPRESSED: usize = OFFSET_BP + LEN_BP;
+pub const LEN_SCOREBOARD_ENTRY: usize = OFFSET_IS_COMPRESSED + 1;
+
 #[repr(C, packed)]
 // 1 + (VLEN + TRANS_ID_BITS + LEN_FU_T + LEN_FU_OP + REG_ADDR_SIZE * 3
 // + XLEN + 4 + (XLEN * 2 + 1) + (LEN_CF_T + VLEN) + 1) + 1
@@ -355,6 +378,8 @@ pub struct id_per_issue_t {
 	pub sbe: scoreboard_entry_t,
 	pub is_ctrl_flow: bool,
 }
+
+pub const OFFSET_SCOREBOARD_ENTRY: usize = 1;
 
 #[repr(C, packed)]
 // (1 + (VLEN + TRANS_ID_BITS + LEN_FU_T + LEN_FU_OP + REG_ADDR_SIZE * 3
@@ -374,3 +399,11 @@ pub const ID2IS_LEN: usize = (1
 		+ (LEN_CF_T + VLEN)
 		+ 1) + 1)
 	* ISSUE_NUM;
+
+pub fn write_variable(
+	value: usize,
+	width: usize,
+	offset: usize,
+	byte_array: &mut [u8; (ID2IS_LEN / 8) as usize + 1],
+) {
+}

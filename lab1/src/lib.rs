@@ -1,5 +1,6 @@
 #![allow(unused)]
 pub mod pkg;
+
 use fnv::FnvHashMap;
 use pkg::*;
 use riscv_emu_rust::cpu::*;
@@ -113,7 +114,43 @@ pub unsafe extern "C" fn dpi_fetch_decode(
 		}
 	};
 
-	// Forming return value
+	// Set register fields
+	match EMULATOR
+		.format_map
+		.clone()
+		.unwrap()
+		.get(&String::from(instruction.get_name()))
+	{
+		Some(f) => match f.as_str() {
+			"B" => println!("[RS] Get B format"),
+			"I" => {
+				println!("[RS] Get I format");
+				match instruction.get_name() {
+					"CSRRC" | "CSRRCI" | "CSRRS" | "CSRRW" | "CSRRWI" | "CSSRRSI" => {
+						println!("[RS] Get CSR format");
+					}
+					_ => {
+						println!("[RS] Get I format");
+						let _iformat = parse_format_i(word);
+						write_variable(
+							_iformat.rs1,
+							REG_ADDR_SIZE,
+							OFFSET_SCOREBOARD_ENTRY + OFFSET_RS1,
+							id2is_entry_o,
+						);
+					}
+				}
+			}
+			"J" => println!("[RS] Get J format"),
+			"R" => println!("[RS] Get R format"),
+			"S" => println!("[RS] Get S format"),
+			"U" => println!("[RS] Get U format"),
+			_ => println!("[RS] Get undefined {} format", f),
+		},
+		None => {}
+	}
+
+	// Set fu fields
 }
 
 /// Dpi EX(backend) interface.
