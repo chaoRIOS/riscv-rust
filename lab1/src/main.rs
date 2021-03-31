@@ -33,6 +33,6 @@ fn main() -> std::io::Result<()> {
 	// run_elf("/opt/orv64-merge/rrv64/tb/test_program/benchmarks/dhrystone.riscv")?;
 	run_elf(&args[1])?;
 	// run_elf("/home/cwang/work/riscv-rust/lab1/test64.elf")?;
-	// println!("len:{:}", (ID2IS_LEN / 8) as usize + 1);
+	// println!("len:{}+({})", ID2IS_LEN, BYTE_ARRAY_OFFSET);
 	Ok(())
 }

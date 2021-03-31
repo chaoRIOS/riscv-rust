@@ -79,7 +79,8 @@ impl Emulator {
 	/// * Added our print function.
 	pub fn run_program(&mut self) {
 		// let fromhost_addr = 0x80001040;
-		let fromhost_addr = 0x80001ea0;
+		// let fromhost_addr = 0x80001ea0;
+		// let fromhost_addr = 0x800011a0;
 		loop {
 			// let disas = self.cpu.disassemble_next_instruction();
 			// self.put_bytes_to_terminal(disas.as_bytes());
@@ -92,7 +93,6 @@ impl Emulator {
 						break;
 					}
 					_ => {
-						// println!("tohost_data_addr:{:X}", tohost_data_addr);
 						// let disas = self.cpu.disassemble_next_instruction();
 						// self.put_bytes_to_terminal(disas.as_bytes());
 						// self.put_bytes_to_terminal(&[10]); // new line
@@ -116,17 +116,22 @@ impl Emulator {
 								.load_word_raw((6 * 4 + tohost_data_addr).into());
 							for i in 0..length {
 								let data = self.cpu.get_mut_mmu().load_raw((i + base).into());
-								// self.put_chars_to_terminal(format!("{:X} ", data).as_bytes());
 								print!("{}", data as char);
 							}
 						}
-						self.cpu.get_mut_mmu().store_word_raw(fromhost_addr, 1);
+						self.cpu
+							.get_mut_mmu()
+							.store_word_raw(self.tohost_addr + 8, 1);
 						self.cpu.get_mut_mmu().store_word_raw(self.tohost_addr, 0);
 					}
 				};
 			}
 			self.tick();
 		}
+
+		let _csr_mcycle_address: u16 = 0xb00;
+		let _latency = self.get_cpu().read_csr_raw(_csr_mcycle_address);
+		println!("Latency = {} cycles", _latency);
 	}
 
 	/// Method for running [`riscv-tests`](https://github.com/riscv/riscv-tests) program.
@@ -223,7 +228,8 @@ impl Emulator {
 			.find_tohost_addr(&program_data_section_headers, &string_table_section_headers)
 		{
 			Some(address) => address,
-			None => 0x80001ea8,
+			// None => 0x80001ea8,
+			None => 0x80001198,
 		};
 
 		// Creates symbol - virtual address mapping

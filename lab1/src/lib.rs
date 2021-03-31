@@ -28,7 +28,7 @@ pub unsafe extern "C" fn dpi_fetch_decode(
 ) {
 	*id2is_valid_o = false;
 	for i in 0..(ID2IS_LEN / 8) as usize + 1 {
-		id2is_entry_o[i] = 0xfa;
+		id2is_entry_o[i] = 0;
 	}
 
 	if let None = EMULATOR.symbol_map {
@@ -114,7 +114,75 @@ pub unsafe extern "C" fn dpi_fetch_decode(
 		}
 	};
 
-	// Set register fields
+	// Set returning fields
+
+	// valid
+	write_variable(1, 1, 0, id2is_entry_o);
+
+	// pc
+	write_variable(
+		instruction_address as u64,
+		VLEN,
+		OFFSET_SCOREBOARD_ENTRY + OFFSET_PC,
+		id2is_entry_o,
+	);
+
+	// trans_id
+	write_variable(
+		0 as u64,
+		TRANS_ID_BITS,
+		OFFSET_SCOREBOARD_ENTRY + OFFSET_TRANS_ID,
+		id2is_entry_o,
+	);
+
+	// fu
+	match EMULATOR
+		.fu_map
+		.clone()
+		.unwrap()
+		.get(&String::from(instruction.get_name()))
+	{
+		Some(f) => write_variable(
+			*f as u64,
+			TRANS_ID_BITS,
+			OFFSET_SCOREBOARD_ENTRY + OFFSET_TRANS_ID,
+			id2is_entry_o,
+		),
+		None => write_variable(
+			FU_T_NONE as u64,
+			TRANS_ID_BITS,
+			OFFSET_SCOREBOARD_ENTRY + OFFSET_TRANS_ID,
+			id2is_entry_o,
+		),
+	};
+
+	// op
+	match EMULATOR
+		.op_map
+		.clone()
+		.unwrap()
+		.get(&String::from(instruction.get_name()))
+	{
+		Some(f) => write_variable(
+			*f as u64,
+			TRANS_ID_BITS,
+			OFFSET_SCOREBOARD_ENTRY + OFFSET_TRANS_ID,
+			id2is_entry_o,
+		),
+		None => write_variable(
+			FU_OP_ADD as u64,
+			TRANS_ID_BITS,
+			OFFSET_SCOREBOARD_ENTRY + OFFSET_TRANS_ID,
+			id2is_entry_o,
+		),
+	};
+
+	// registers
+	// rs1
+	// rs2
+	// rd
+	// imm
+
 	match EMULATOR
 		.format_map
 		.clone()
@@ -122,35 +190,266 @@ pub unsafe extern "C" fn dpi_fetch_decode(
 		.get(&String::from(instruction.get_name()))
 	{
 		Some(f) => match f.as_str() {
-			"B" => println!("[RS] Get B format"),
+			"B" => {
+				// println!("[RS] Get B format");
+				let _b_format = parse_format_b(word);
+
+				write_variable(
+					_b_format.rs1 as u64,
+					REG_ADDR_SIZE,
+					OFFSET_SCOREBOARD_ENTRY + OFFSET_RS1,
+					id2is_entry_o,
+				);
+
+				write_variable(
+					_b_format.rs2 as u64,
+					REG_ADDR_SIZE,
+					OFFSET_SCOREBOARD_ENTRY + OFFSET_RS2,
+					id2is_entry_o,
+				);
+
+				write_variable(
+					_b_format.imm as u64,
+					XLEN,
+					OFFSET_SCOREBOARD_ENTRY + OFFSET_RESULT,
+					id2is_entry_o,
+				);
+			}
 			"I" => {
-				println!("[RS] Get I format");
+				// println!("[RS] Get I format");
 				match instruction.get_name() {
-					"CSRRC" | "CSRRCI" | "CSRRS" | "CSRRW" | "CSRRWI" | "CSSRRSI" => {
-						println!("[RS] Get CSR format");
-					}
-					_ => {
-						println!("[RS] Get I format");
-						let _iformat = parse_format_i(word);
+					"CSRRC" | "CSRRCI" | "CSRRS" | "CSRRW" | "CSRRWI" | "CSRRSI" => {
+						// println!("[RS] Get CSR format");
+						let _csr_format = parse_format_csr(word);
+
 						write_variable(
-							_iformat.rs1,
+							_csr_format.csr as u64,
 							REG_ADDR_SIZE,
 							OFFSET_SCOREBOARD_ENTRY + OFFSET_RS1,
+							id2is_entry_o,
+						);
+						write_variable(
+							(_csr_format.rs & 0x1f) as u64,
+							REG_ADDR_SIZE,
+							OFFSET_SCOREBOARD_ENTRY + OFFSET_RS2,
+							id2is_entry_o,
+						);
+						write_variable(
+							_csr_format.rd as u64,
+							REG_ADDR_SIZE,
+							OFFSET_SCOREBOARD_ENTRY + OFFSET_RD,
+							id2is_entry_o,
+						);
+						match instruction.get_name() {
+							"CSRRCI" | "CSRRWI" | "CSRRSI" => {
+								//use_zimm
+								write_variable(
+									1 as u64,
+									1,
+									OFFSET_SCOREBOARD_ENTRY + OFFSET_USE_ZIMM,
+									id2is_entry_o,
+								);
+							}
+							_ => {}
+						}
+					}
+					_ => {
+						// println!("[RS] Get I format");
+						let _i_format = parse_format_i(word);
+
+						write_variable(
+							_i_format.rs1 as u64,
+							REG_ADDR_SIZE,
+							OFFSET_SCOREBOARD_ENTRY + OFFSET_RS1,
+							id2is_entry_o,
+						);
+
+						write_variable(
+							_i_format.rd as u64,
+							REG_ADDR_SIZE,
+							OFFSET_SCOREBOARD_ENTRY + OFFSET_RD,
+							id2is_entry_o,
+						);
+
+						write_variable(
+							_i_format.imm as u64,
+							XLEN,
+							OFFSET_SCOREBOARD_ENTRY + OFFSET_RESULT,
+							id2is_entry_o,
+						);
+
+						//use_imm
+						write_variable(
+							1 as u64,
+							1,
+							OFFSET_SCOREBOARD_ENTRY + OFFSET_USE_IMM,
 							id2is_entry_o,
 						);
 					}
 				}
 			}
-			"J" => println!("[RS] Get J format"),
-			"R" => println!("[RS] Get R format"),
-			"S" => println!("[RS] Get S format"),
-			"U" => println!("[RS] Get U format"),
-			_ => println!("[RS] Get undefined {} format", f),
+			"J" => {
+				// println!("[RS] Get J format");
+				let _j_format = parse_format_j(word);
+
+				write_variable(
+					_j_format.rd as u64,
+					REG_ADDR_SIZE,
+					OFFSET_SCOREBOARD_ENTRY + OFFSET_RD,
+					id2is_entry_o,
+				);
+
+				write_variable(
+					_j_format.imm as u64,
+					XLEN,
+					OFFSET_SCOREBOARD_ENTRY + OFFSET_RESULT,
+					id2is_entry_o,
+				);
+
+				//use_imm
+				write_variable(
+					1 as u64,
+					1,
+					OFFSET_SCOREBOARD_ENTRY + OFFSET_USE_IMM,
+					id2is_entry_o,
+				);
+			}
+			"R" => {
+				// println!("[RS] Get R format");
+				let _r_format = parse_format_r(word);
+
+				write_variable(
+					_r_format.rs1 as u64,
+					REG_ADDR_SIZE,
+					OFFSET_SCOREBOARD_ENTRY + OFFSET_RS1,
+					id2is_entry_o,
+				);
+
+				write_variable(
+					_r_format.rs2 as u64,
+					REG_ADDR_SIZE,
+					OFFSET_SCOREBOARD_ENTRY + OFFSET_RS2,
+					id2is_entry_o,
+				);
+
+				write_variable(
+					_r_format.rd as u64,
+					REG_ADDR_SIZE,
+					OFFSET_SCOREBOARD_ENTRY + OFFSET_RD,
+					id2is_entry_o,
+				);
+			}
+			"S" => {
+				// println!("[RS] Get S format");
+				let _s_format = parse_format_s(word);
+
+				write_variable(
+					_s_format.rs1 as u64,
+					REG_ADDR_SIZE,
+					OFFSET_SCOREBOARD_ENTRY + OFFSET_RS1,
+					id2is_entry_o,
+				);
+
+				write_variable(
+					_s_format.rs2 as u64,
+					REG_ADDR_SIZE,
+					OFFSET_SCOREBOARD_ENTRY + OFFSET_RS2,
+					id2is_entry_o,
+				);
+
+				write_variable(
+					_s_format.imm as u64,
+					XLEN,
+					OFFSET_SCOREBOARD_ENTRY + OFFSET_RESULT,
+					id2is_entry_o,
+				);
+
+				//use_imm
+				write_variable(
+					1 as u64,
+					1,
+					OFFSET_SCOREBOARD_ENTRY + OFFSET_USE_IMM,
+					id2is_entry_o,
+				);
+			}
+			"U" => {
+				// println!("[RS] Get U format");
+				let _u_format = parse_format_u(word);
+
+				write_variable(
+					_u_format.rd as u64,
+					REG_ADDR_SIZE,
+					OFFSET_SCOREBOARD_ENTRY + OFFSET_RD,
+					id2is_entry_o,
+				);
+
+				write_variable(
+					_u_format.imm as u64,
+					XLEN,
+					OFFSET_SCOREBOARD_ENTRY + OFFSET_RESULT,
+					id2is_entry_o,
+				);
+
+				//use_imm
+				write_variable(
+					1 as u64,
+					1,
+					OFFSET_SCOREBOARD_ENTRY + OFFSET_USE_IMM,
+					id2is_entry_o,
+				);
+			}
+			_ => {
+				// println!("[RS] Get undefined {} format", f),
+			}
 		},
 		None => {}
 	}
 
-	// Set fu fields
+	// Set tag fields
+	// valid
+	write_variable(
+		1 as u64,
+		1,
+		OFFSET_SCOREBOARD_ENTRY + OFFSET_VALID,
+		id2is_entry_o,
+	);
+
+	// use_pc
+	match instruction.get_name() {
+		"AUIPC" => {
+			write_variable(
+				1 as u64,
+				1,
+				OFFSET_SCOREBOARD_ENTRY + OFFSET_USE_PC,
+				id2is_entry_o,
+			);
+		}
+		_ => {}
+	}
+
+	// is_compressed
+	write_variable(
+		0 as u64,
+		1,
+		OFFSET_SCOREBOARD_ENTRY + OFFSET_IS_COMPRESSED,
+		id2is_entry_o,
+	);
+
+	// is_ctrl_flow
+	match instruction.get_name() {
+		"BEQ" | "BGE" | "BGEU" | "BLT" | "BLTU" | "BNE" | "JAL" | "JALR" => {
+			write_variable(
+				1 as u64,
+				1,
+				OFFSET_SCOREBOARD_ENTRY + LEN_SCOREBOARD_ENTRY,
+				id2is_entry_o,
+			);
+		}
+		_ => {}
+	}
+
+	// id2is_valid_o
+	*id2is_valid_o = true;
 }
 
 /// Dpi EX(backend) interface.
@@ -164,7 +463,18 @@ pub unsafe extern "C" fn dpi_fetch_decode(
 ///
 /// to carry calculating results
 #[no_mangle]
-pub extern "C" fn dpi_execute(data: u32) {
+pub extern "C" fn dpi_issue_execute_writeback(
+	_clk_i: bool,
+	rst_ni: bool,
+	flush_i: bool,
+	id2is_valid_i: bool,
+	id2is_entry_i: &[u8; (ID2IS_LEN / 8) as usize + 1],
+
+	ex2io_load_o: &mut bool,
+	ex2io_store_o: &mut bool,
+	ex2io_data_o: &mut [u8; (XLEN / 8) as usize + 1],
+	ex2io_addr_o: &mut [u8; (XLEN / 8) as usize + 1],
+) {
 	// let instr: &Instruction = match EMULATOR.get_cpu().decode_raw(data: u32) {
 	// 	Ok(i) => i,
 	// 	_ => panic!("decode failed"),
@@ -175,7 +485,20 @@ pub extern "C" fn dpi_execute(data: u32) {
 ///
 /// @TODO: Determine impl
 #[no_mangle]
-pub extern "C" fn dpi_load_store(data: u64, addr: u64) {
+pub extern "C" fn dpi_load_store(
+	_clk_i: bool,
+	rst_ni: bool,
+	flush_i: bool,
+	id2is_valid_i: bool,
+	id2is_entry_i: &[u8; (ID2IS_LEN / 8) as usize + 1],
+
+	ex2io_load_i: bool,
+	ex2io_store_i: bool,
+	ex2io_data_i: &[u8; (XLEN / 8) as usize + 1],
+	ex2io_addr_i: &[u8; (XLEN / 8) as usize + 1],
+	io2wb_load_valid_o: &mut bool,
+	io2wb_load_data_o: &mut bool,
+) {
 	// let instr: &Instruction = match EMULATOR.get_cpu().decode_raw(data: u32) {
 	// 	Ok(i) => i,
 	// 	_ => panic!("decode failed"),

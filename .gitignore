@@ -7,3 +7,5 @@ wasm/target
 screenshots/
 *dump
 *elf
+*bin
+*csv
