@@ -117,7 +117,12 @@ pub unsafe extern "C" fn dpi_fetch_decode(
 	// Set returning fields
 
 	// valid
-	write_variable(1, 1, 0, id2is_entry_o);
+	write_variable(
+		1,
+		1,
+		OFFSET_SCOREBOARD_ENTRY + LEN_SCOREBOARD_ENTRY,
+		id2is_entry_o,
+	);
 
 	// pc
 	write_variable(
@@ -438,12 +443,7 @@ pub unsafe extern "C" fn dpi_fetch_decode(
 	// is_ctrl_flow
 	match instruction.get_name() {
 		"BEQ" | "BGE" | "BGEU" | "BLT" | "BLTU" | "BNE" | "JAL" | "JALR" => {
-			write_variable(
-				1 as u64,
-				1,
-				OFFSET_SCOREBOARD_ENTRY + LEN_SCOREBOARD_ENTRY,
-				id2is_entry_o,
-			);
+			write_variable(1 as u64, 1, 0, id2is_entry_o);
 		}
 		_ => {}
 	}

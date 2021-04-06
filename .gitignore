@@ -5,6 +5,8 @@ cli/target
 wasm/Cargo.lock
 wasm/target
 screenshots/
+/lab1/unit-test/*
+!/lab1/unit-test/*.rs
 *dump
 *elf
 *bin

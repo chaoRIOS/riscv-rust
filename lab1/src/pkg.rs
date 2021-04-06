@@ -312,30 +312,30 @@ pub const CF_T_JUMP_R: u8 = 3;
 pub const CF_T_RETURN: u8 = 4;
 
 // XLEN * 2 + 1
-pub struct exception_t {
+pub struct ExceptionT {
 	pub cause: [bool; XLEN],
 	pub tval: [bool; XLEN],
 	pub valid: bool,
 }
 
-pub const OFFSET_EXCEPTION_CAUSE: usize = 0;
-pub const OFFSET_EXCEPTION_TVAL: usize = OFFSET_EXCEPTION_CAUSE + XLEN;
-pub const OFFSET_EXCEPTION_VALID: usize = OFFSET_EXCEPTION_TVAL + XLEN;
-pub const LEN_EXCEPTION: usize = OFFSET_EXCEPTION_VALID + 1;
+pub const OFFSET_EXCEPTION_VALID: usize = 0;
+pub const OFFSET_EXCEPTION_TVAL: usize = OFFSET_EXCEPTION_VALID + 1;
+pub const OFFSET_EXCEPTION_CAUSE: usize = OFFSET_EXCEPTION_TVAL + XLEN;
+pub const LEN_EXCEPTION: usize = OFFSET_EXCEPTION_CAUSE + XLEN;
 
 // LEN_CF_T + VLEN
-pub struct branchpredict_sbe_t {
+pub struct BranchpredictSbeT {
 	pub cf: [bool; LEN_CF_T],
 	pub predict_address: [bool; VLEN],
 }
 
-pub const OFFSET_BP_CF: usize = 0;
-pub const OFFSET_BP_PREDICT_ADDRESS: usize = OFFSET_BP_CF + LEN_CF_T;
-pub const LEN_BP: usize = OFFSET_BP_PREDICT_ADDRESS + VLEN;
+pub const OFFSET_BP_PREDICT_ADDRESS: usize = 0;
+pub const OFFSET_BP_CF: usize = OFFSET_BP_PREDICT_ADDRESS + VLEN;
+pub const LEN_BP: usize = OFFSET_BP_CF + LEN_CF_T;
 
 // VLEN + TRANS_ID_BITS + LEN_FU_T + LEN_FU_OP + REG_ADDR_SIZE * 3
 // + XLEN + 4 + (XLEN * 2 + 1) + (LEN_CF_T + VLEN) + 1
-pub struct scoreboard_entry_t {
+pub struct ScoreboardEntryT {
 	pub pc: [bool; VLEN],
 	pub trans_id: [bool; TRANS_ID_BITS],
 	pub fu: [bool; LEN_FU_T],
@@ -348,44 +348,63 @@ pub struct scoreboard_entry_t {
 	pub use_imm: bool,
 	pub use_zimm: bool,
 	pub use_pc: bool,
-	pub ex: exception_t,
-	pub bp: branchpredict_sbe_t,
+	pub ex: ExceptionT,
+	pub bp: BranchpredictSbeT,
 	pub is_compressed: bool,
 }
 
-pub const OFFSET_PC: usize = 0;
-pub const OFFSET_TRANS_ID: usize = OFFSET_PC + VLEN;
-pub const OFFSET_FU: usize = OFFSET_TRANS_ID + TRANS_ID_BITS;
-pub const OFFSET_OP: usize = OFFSET_FU + LEN_FU_T;
-pub const OFFSET_RS1: usize = OFFSET_OP + LEN_FU_OP;
-pub const OFFSET_RS2: usize = OFFSET_RS1 + REG_ADDR_SIZE;
-pub const OFFSET_RD: usize = OFFSET_RS2 + REG_ADDR_SIZE;
-pub const OFFSET_RESULT: usize = OFFSET_RD + REG_ADDR_SIZE;
-pub const OFFSET_VALID: usize = OFFSET_RESULT + XLEN;
-pub const OFFSET_USE_IMM: usize = OFFSET_VALID + 1;
-pub const OFFSET_USE_ZIMM: usize = OFFSET_USE_IMM + 1;
-pub const OFFSET_USE_PC: usize = OFFSET_USE_ZIMM + 1;
-pub const OFFSET_EX: usize = OFFSET_USE_PC + 1;
-pub const OFFSET_BP: usize = OFFSET_EX + LEN_EXCEPTION;
-pub const OFFSET_IS_COMPRESSED: usize = OFFSET_BP + LEN_BP;
-pub const LEN_SCOREBOARD_ENTRY: usize = OFFSET_IS_COMPRESSED + 1;
+// pub const OFFSET_PC: usize = ID2IS_LEN - 1;
+// pub const OFFSET_TRANS_ID: usize = OFFSET_PC - VLEN;
+// pub const OFFSET_FU: usize = OFFSET_TRANS_ID + TRANS_ID_BITS;
+// pub const OFFSET_OP: usize = OFFSET_FU + LEN_FU_T;
+// pub const OFFSET_RS1: usize = OFFSET_OP + LEN_FU_OP;
+// pub const OFFSET_RS2: usize = OFFSET_RS1 + REG_ADDR_SIZE;
+// pub const OFFSET_RD: usize = OFFSET_RS2 + REG_ADDR_SIZE;
+// pub const OFFSET_RESULT: usize = OFFSET_RD + REG_ADDR_SIZE;
+// pub const OFFSET_VALID: usize = OFFSET_RESULT + XLEN;
+// pub const OFFSET_USE_IMM: usize = OFFSET_VALID + 1;
+// pub const OFFSET_USE_ZIMM: usize = OFFSET_USE_IMM + 1;
+// pub const OFFSET_USE_PC: usize = OFFSET_USE_ZIMM + 1;
+// pub const OFFSET_EX: usize = OFFSET_USE_PC + 1;
+// pub const OFFSET_BP: usize = OFFSET_EX + LEN_EXCEPTION;
+// pub const OFFSET_IS_COMPRESSED: usize = OFFSET_BP + LEN_BP;
+
+pub const OFFSET_PC: usize = OFFSET_TRANS_ID + TRANS_ID_BITS;
+pub const OFFSET_TRANS_ID: usize = OFFSET_FU + LEN_FU_T;
+pub const OFFSET_FU: usize = OFFSET_OP + LEN_FU_OP;
+pub const OFFSET_OP: usize = OFFSET_RS1 + REG_ADDR_SIZE;
+pub const OFFSET_RS1: usize = OFFSET_RS2 + REG_ADDR_SIZE;
+pub const OFFSET_RS2: usize = OFFSET_RD + REG_ADDR_SIZE;
+pub const OFFSET_RD: usize = OFFSET_RESULT + XLEN;
+pub const OFFSET_RESULT: usize = OFFSET_VALID + 1;
+pub const OFFSET_VALID: usize = OFFSET_USE_IMM + 1;
+pub const OFFSET_USE_IMM: usize = OFFSET_USE_ZIMM + 1;
+pub const OFFSET_USE_ZIMM: usize = OFFSET_USE_PC + 1;
+pub const OFFSET_USE_PC: usize = OFFSET_EX + LEN_EXCEPTION;
+pub const OFFSET_EX: usize = OFFSET_BP + LEN_BP;
+pub const OFFSET_BP: usize = OFFSET_IS_COMPRESSED + 1;
+pub const OFFSET_IS_COMPRESSED: usize = 0;
+
+pub const LEN_SCOREBOARD_ENTRY: usize = OFFSET_PC + VLEN;
 
 #[repr(C, packed)]
 // 1 + (VLEN + TRANS_ID_BITS + LEN_FU_T + LEN_FU_OP + REG_ADDR_SIZE * 3
 // + XLEN + 4 + (XLEN * 2 + 1) + (LEN_CF_T + VLEN) + 1) + 1
-pub struct id_per_issue_t {
+pub struct IdPerIssueT {
 	pub valid: bool,
-	pub sbe: scoreboard_entry_t,
+	pub sbe: ScoreboardEntryT,
 	pub is_ctrl_flow: bool,
 }
 
+// 0              1       ...               ...   312   LEN(313)
+// [is_ctrl_flow, sbe.is_compressed, ... , sbe.pc, valid]
 pub const OFFSET_SCOREBOARD_ENTRY: usize = 1;
 
 #[repr(C, packed)]
 // (1 + (VLEN + TRANS_ID_BITS + LEN_FU_T + LEN_FU_OP + REG_ADDR_SIZE * 3
 // + XLEN + 4 + (XLEN * 2 + 1) + (LEN_CF_T + VLEN) + 1) + 1) * ISSUE_NUM
 pub struct inst_id2is_t {
-	issue_inst: [id_per_issue_t; ISSUE_NUM],
+	issue_inst: [IdPerIssueT; ISSUE_NUM],
 }
 
 pub const ID2IS_LEN: usize = (1
@@ -400,7 +419,7 @@ pub const ID2IS_LEN: usize = (1
 		+ 1) + 1)
 	* ISSUE_NUM;
 
-// this is a const, e.g. 320 array write 314 flush to right, make it be 6
+// this is a const, e.g. 320 array write 313 flush to right, make it be 7
 pub const BYTE_ARRAY_OFFSET: usize = ((ID2IS_LEN / 8) as usize + 1) * 8 - ID2IS_LEN;
 
 /*
@@ -418,10 +437,10 @@ pub fn write_variable(
 	offset: usize, // consider this is 0--0ffset-1 used, offset+1 unused
 	byte_array: &mut [u8; (ID2IS_LEN / 8) as usize + 1],
 ) {
-	// println!(
-	// 	"[RS] Writing {} with {} bits to {} offset",
-	// 	value, width, offset
-	// );
+	println!(
+		"[RS] Writing {} with {} bits to {} offset",
+		value, width, offset
+	);
 	let target_l = (BYTE_ARRAY_OFFSET + offset) / 8 as usize;
 	let target_l_width = 8 - (BYTE_ARRAY_OFFSET + offset) % 8;
 	let target_r = (BYTE_ARRAY_OFFSET + offset + width) / 8 as usize;
@@ -430,27 +449,27 @@ pub fn write_variable(
 	let mut bit_processed = target_l_width;
 	let mut value_byte: u8;
 	let flitered_value = value & (make_all_ones(width) as u64);
-	// println!(
-	// 	"debuglog:: at write_variable, flitered_value={0}",
-	// 	flitered_value
-	// );
+	println!(
+		"debuglog:: at write_variable, flitered_value={0}",
+		flitered_value
+	);
 	{
 		mask = (make_all_ones(target_l_width) << (8 - target_l_width)) as u8;
 		value_byte =
 			((flitered_value & make_all_ones(target_l_width)) << (8 - target_l_width)) as u8;
-		// println!(
-		// 	"debuglog:: Processing leftwidth, tar_l_wid={0},tar_l={1},mask={2},valuebyte={3}",
-		// 	target_l_width, target_l, mask, value_byte
-		// );
+		println!(
+			"debuglog:: Processing leftwidth, tar_l_wid={0},tar_l={1},mask={2},valuebyte={3}",
+			target_l_width, target_l, mask, value_byte
+		);
 		write_byte(value_byte, mask, &mut byte_array[target_l]);
 	}
 	for i in target_l + 1..target_r {
 		mask = make_all_ones(8) as u8;
 		value_byte = get_range_bits(flitered_value, bit_processed, bit_processed + 8) as u8;
-		// println!(
-		// 	"debuglog:: Processing midwidth, i={0},mask={1},valuebyte={2}",
-		// 	i, mask, value_byte
-		// );
+		println!(
+			"debuglog:: Processing midwidth, i={0},mask={1},valuebyte={2}",
+			i, mask, value_byte
+		);
 		write_byte(value_byte, mask, &mut byte_array[i]);
 		bit_processed += 8;
 	}
@@ -458,7 +477,14 @@ pub fn write_variable(
 		mask = make_all_ones(target_r_width) as u8;
 		value_byte = (get_range_bits(flitered_value, bit_processed, width)
 			& make_all_ones(target_r_width)) as u8;
-		// println!("debuglog:: Processing rightwidth, tar_r_wid={0},tar_r={1},mask={2},valuebyte={3},bitprocessed={4},getrangebit={5}",target_r_width,target_r,mask,value_byte,bit_processed,get_range_bits(flitered_value, bit_processed, width));
+		println!(
+			"debuglog:: Processing rightwidth, tar_r_wid={0},tar_r={1},mask={2},valuebyte={3},bitprocessed={4},getrangebit={5}",
+			target_r_width,
+			target_r,
+			mask,
+			value_byte,
+			bit_processed,
+			get_range_bits(flitered_value, bit_processed, width));
 		write_byte(value_byte, mask, &mut byte_array[target_r]);
 	}
 }
