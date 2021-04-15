@@ -1,4 +1,5 @@
 #![allow(unused)]
+// use crate::utils::*;
 use fnv::FnvHashMap;
 use riscv_emu_rust::cpu::*;
 use riscv_emu_rust::memory::*;
@@ -65,159 +66,159 @@ pub const COSIM_INSTRUCTIONS_FORMAT: [&'static str; 75] = [
 ];
 
 pub const COSIM_INSTRUCTIONS_FU_T: [u8; 75] = [
-	FU_T_ALU,
-	FU_T_ALU,
-	FU_T_ALU,
-	FU_T_ALU,
-	FU_T_ALU,
-	FU_T_ALU,
-	FU_T_ALU,
-	FU_T_CTRL_FLOW,
-	FU_T_CTRL_FLOW,
-	FU_T_CTRL_FLOW,
-	FU_T_CTRL_FLOW,
-	FU_T_CTRL_FLOW,
-	FU_T_CTRL_FLOW,
-	FU_T_CSR,
-	FU_T_CSR,
-	FU_T_CSR,
-	FU_T_CSR,
-	FU_T_CSR,
-	FU_T_CSR,
-	FU_T_MULT,
-	FU_T_MULT,
-	FU_T_MULT,
-	FU_T_MULT,
-	FU_T_NONE,
-	FU_T_NONE,
-	FU_T_NONE,
-	FU_T_NONE,
-	FU_T_CTRL_FLOW,
-	FU_T_CTRL_FLOW,
-	FU_T_LOAD,
-	FU_T_LOAD,
-	FU_T_LOAD,
-	FU_T_LOAD,
-	FU_T_LOAD,
-	FU_T_ALU,
-	FU_T_LOAD,
-	FU_T_LOAD,
-	FU_T_NONE,
-	FU_T_MULT,
-	FU_T_MULT,
-	FU_T_MULT,
-	FU_T_MULT,
-	FU_T_MULT,
-	FU_T_ALU,
-	FU_T_ALU,
-	FU_T_MULT,
-	FU_T_MULT,
-	FU_T_MULT,
-	FU_T_MULT,
-	FU_T_STORE,
-	FU_T_STORE,
-	FU_T_STORE,
-	FU_T_ALU,
-	FU_T_ALU,
-	FU_T_ALU,
-	FU_T_ALU,
-	FU_T_ALU,
-	FU_T_ALU,
-	FU_T_ALU,
-	FU_T_ALU,
-	FU_T_ALU,
-	FU_T_ALU,
-	FU_T_ALU,
-	FU_T_ALU,
-	FU_T_NONE,
-	FU_T_ALU,
-	FU_T_ALU,
-	FU_T_ALU,
-	FU_T_ALU,
-	FU_T_ALU,
-	FU_T_ALU,
-	FU_T_STORE,
-	FU_T_NONE,
-	FU_T_ALU,
-	FU_T_ALU,
+	FU_ALU,
+	FU_ALU,
+	FU_ALU,
+	FU_ALU,
+	FU_ALU,
+	FU_ALU,
+	FU_ALU,
+	FU_CTRL_FLOW,
+	FU_CTRL_FLOW,
+	FU_CTRL_FLOW,
+	FU_CTRL_FLOW,
+	FU_CTRL_FLOW,
+	FU_CTRL_FLOW,
+	FU_CSR,
+	FU_CSR,
+	FU_CSR,
+	FU_CSR,
+	FU_CSR,
+	FU_CSR,
+	FU_MULT,
+	FU_MULT,
+	FU_MULT,
+	FU_MULT,
+	FU_NONE,
+	FU_NONE,
+	FU_NONE,
+	FU_NONE,
+	FU_CTRL_FLOW,
+	FU_CTRL_FLOW,
+	FU_LOAD,
+	FU_LOAD,
+	FU_LOAD,
+	FU_LOAD,
+	FU_LOAD,
+	FU_ALU,
+	FU_LOAD,
+	FU_LOAD,
+	FU_NONE,
+	FU_MULT,
+	FU_MULT,
+	FU_MULT,
+	FU_MULT,
+	FU_MULT,
+	FU_ALU,
+	FU_ALU,
+	FU_MULT,
+	FU_MULT,
+	FU_MULT,
+	FU_MULT,
+	FU_STORE,
+	FU_STORE,
+	FU_STORE,
+	FU_ALU,
+	FU_ALU,
+	FU_ALU,
+	FU_ALU,
+	FU_ALU,
+	FU_ALU,
+	FU_ALU,
+	FU_ALU,
+	FU_ALU,
+	FU_ALU,
+	FU_ALU,
+	FU_ALU,
+	FU_NONE,
+	FU_ALU,
+	FU_ALU,
+	FU_ALU,
+	FU_ALU,
+	FU_ALU,
+	FU_ALU,
+	FU_STORE,
+	FU_NONE,
+	FU_ALU,
+	FU_ALU,
 ];
 
 pub const COSIM_INSTRUCTIONS_FU_OP: [u8; 75] = [
-	FU_OP_ADD,
-	FU_OP_ADD,
-	FU_OP_ADDW,
-	FU_OP_ADDW,
-	FU_OP_ANDL,
-	FU_OP_ANDL,
-	FU_OP_ADD,
-	FU_OP_EQ,
-	FU_OP_GES,
-	FU_OP_GEU,
-	FU_OP_LTS,
-	FU_OP_LTU,
-	FU_OP_NE,
-	FU_OP_CSR_READ,
-	FU_OP_CSR_READ,
-	FU_OP_CSR_READ,
-	FU_OP_CSR_WRITE,
-	FU_OP_CSR_WRITE,
-	FU_OP_CSR_READ,
-	FU_OP_DIV,
-	FU_OP_DIVU,
-	FU_OP_DIVUW,
-	FU_OP_DIVW,
-	FU_OP_ADD, //EBREAK
-	FU_OP_ECALL,
-	FU_OP_FENCE,
-	FU_OP_FENCE_I,
-	FU_OP_JALR,
-	FU_OP_JALR,
-	FU_OP_LB,
-	FU_OP_LBU,
-	FU_OP_LD,
-	FU_OP_LH,
-	FU_OP_LHU,
-	FU_OP_ADD,
-	FU_OP_LW,
-	FU_OP_LWU,
-	FU_OP_MRET,
-	FU_OP_MUL,
-	FU_OP_MULH,
-	FU_OP_MULHSU,
-	FU_OP_MULHU,
-	FU_OP_MULW,
-	FU_OP_ORL,
-	FU_OP_ORL,
-	FU_OP_REM,
-	FU_OP_REMU,
-	FU_OP_REMUW,
-	FU_OP_REMW,
-	FU_OP_SB,
-	FU_OP_SD,
-	FU_OP_SH,
-	FU_OP_SLL,
-	FU_OP_SLL,
-	FU_OP_SLLW,
-	FU_OP_SLLW,
-	FU_OP_SLTS,
-	FU_OP_SLTS,
-	FU_OP_SLTU,
-	FU_OP_SLTU,
-	FU_OP_SRA,
-	FU_OP_SRA,
-	FU_OP_SRAW,
-	FU_OP_SRAW,
-	FU_OP_SRET,
-	FU_OP_SRL,
-	FU_OP_SRL,
-	FU_OP_SRLW,
-	FU_OP_SRLW,
-	FU_OP_SUB,
-	FU_OP_SUBW,
-	FU_OP_SW,
-	FU_OP_WFI,
-	FU_OP_XORL,
-	FU_OP_XORL,
+	OP_ADD,
+	OP_ADD,
+	OP_ADDW,
+	OP_ADDW,
+	OP_ANDL,
+	OP_ANDL,
+	OP_ADD,
+	OP_EQ,
+	OP_GES,
+	OP_GEU,
+	OP_LTS,
+	OP_LTU,
+	OP_NE,
+	OP_CSR_READ,
+	OP_CSR_READ,
+	OP_CSR_READ,
+	OP_CSR_WRITE,
+	OP_CSR_WRITE,
+	OP_CSR_READ,
+	OP_DIV,
+	OP_DIVU,
+	OP_DIVUW,
+	OP_DIVW,
+	OP_ADD, //EBREAK
+	OP_ECALL,
+	OP_FENCE,
+	OP_FENCE_I,
+	OP_ADD, //JAL
+	OP_JALR,
+	OP_LB,
+	OP_LBU,
+	OP_LD,
+	OP_LH,
+	OP_LHU,
+	OP_ADD,
+	OP_LW,
+	OP_LWU,
+	OP_MRET,
+	OP_MUL,
+	OP_MULH,
+	OP_MULHSU,
+	OP_MULHU,
+	OP_MULW,
+	OP_ORL,
+	OP_ORL,
+	OP_REM,
+	OP_REMU,
+	OP_REMUW,
+	OP_REMW,
+	OP_SB,
+	OP_SD,
+	OP_SH,
+	OP_SLL,
+	OP_SLL,
+	OP_SLLW,
+	OP_SLLW,
+	OP_SLTS,
+	OP_SLTS,
+	OP_SLTU,
+	OP_SLTU,
+	OP_SRA,
+	OP_SRA,
+	OP_SRAW,
+	OP_SRAW,
+	OP_SRET,
+	OP_SRL,
+	OP_SRL,
+	OP_SRLW,
+	OP_SRLW,
+	OP_SUB,
+	OP_SUBW,
+	OP_SW,
+	OP_WFI,
+	OP_XORL,
+	OP_XORL,
 ];
 
 /// Configurable globals
@@ -231,79 +232,79 @@ pub const NR_SB_ENTRIES: usize = 8;
 pub const TRANS_ID_BITS: usize = 3; // log2(NR_SB_ENTRIES)
 pub const ISSUE_NUM: usize = 1;
 // Impl globals
-pub const LEN_FU_T: usize = 4;
-pub const LEN_FU_OP: usize = 7;
-pub const LEN_CF_T: usize = 3;
+pub const LEN_FU: usize = 4;
+pub const LEN_OP: usize = 7;
+pub const LEN_CF: usize = 3;
 
 // FU_T ENUMs
-pub const FU_T_NONE: u8 = 0;
-pub const FU_T_LOAD: u8 = 1;
-pub const FU_T_STORE: u8 = 2;
-pub const FU_T_ALU: u8 = 3;
-pub const FU_T_CTRL_FLOW: u8 = 4;
-pub const FU_T_MULT: u8 = 5;
-pub const FU_T_CSR: u8 = 6;
+pub const FU_NONE: u8 = 0;
+pub const FU_LOAD: u8 = 1;
+pub const FU_STORE: u8 = 2;
+pub const FU_ALU: u8 = 3;
+pub const FU_CTRL_FLOW: u8 = 4;
+pub const FU_MULT: u8 = 5;
+pub const FU_CSR: u8 = 6;
 
 // FU_OP ENUMs
-pub const FU_OP_ADD: u8 = 0;
-pub const FU_OP_SUB: u8 = 1;
-pub const FU_OP_ADDW: u8 = 2;
-pub const FU_OP_SUBW: u8 = 3;
-pub const FU_OP_XORL: u8 = 4;
-pub const FU_OP_ORL: u8 = 5;
-pub const FU_OP_ANDL: u8 = 6;
-pub const FU_OP_SRA: u8 = 7;
-pub const FU_OP_SRL: u8 = 8;
-pub const FU_OP_SLL: u8 = 9;
-pub const FU_OP_SRLW: u8 = 10;
-pub const FU_OP_SLLW: u8 = 11;
-pub const FU_OP_SRAW: u8 = 12;
-pub const FU_OP_LTS: u8 = 13;
-pub const FU_OP_LTU: u8 = 14;
-pub const FU_OP_GES: u8 = 15;
-pub const FU_OP_GEU: u8 = 16;
-pub const FU_OP_EQ: u8 = 17;
-pub const FU_OP_NE: u8 = 18;
-pub const FU_OP_JALR: u8 = 19;
-pub const FU_OP_BRANCH: u8 = 20;
-pub const FU_OP_SLTS: u8 = 21;
-pub const FU_OP_SLTU: u8 = 22;
-pub const FU_OP_MRET: u8 = 23;
-pub const FU_OP_SRET: u8 = 24;
-pub const FU_OP_DRET: u8 = 25;
-pub const FU_OP_ECALL: u8 = 26;
-pub const FU_OP_WFI: u8 = 27;
-pub const FU_OP_FENCE: u8 = 28;
-pub const FU_OP_FENCE_I: u8 = 29;
-pub const FU_OP_SFENCE_VMA: u8 = 30;
-pub const FU_OP_CSR_WRITE: u8 = 31;
-pub const FU_OP_CSR_READ: u8 = 32;
-pub const FU_OP_CSR_SET: u8 = 33;
-pub const FU_OP_CSR_CLEAR: u8 = 34;
-pub const FU_OP_LD: u8 = 35;
-pub const FU_OP_SD: u8 = 36;
-pub const FU_OP_LW: u8 = 37;
-pub const FU_OP_LWU: u8 = 38;
-pub const FU_OP_SW: u8 = 39;
-pub const FU_OP_LH: u8 = 40;
-pub const FU_OP_LHU: u8 = 41;
-pub const FU_OP_SH: u8 = 42;
-pub const FU_OP_LB: u8 = 43;
-pub const FU_OP_SB: u8 = 44;
-pub const FU_OP_LBU: u8 = 45;
-pub const FU_OP_MUL: u8 = 46;
-pub const FU_OP_MULH: u8 = 47;
-pub const FU_OP_MULHU: u8 = 48;
-pub const FU_OP_MULHSU: u8 = 49;
-pub const FU_OP_MULW: u8 = 50;
-pub const FU_OP_DIV: u8 = 51;
-pub const FU_OP_DIVU: u8 = 52;
-pub const FU_OP_DIVW: u8 = 53;
-pub const FU_OP_DIVUW: u8 = 54;
-pub const FU_OP_REM: u8 = 55;
-pub const FU_OP_REMU: u8 = 56;
-pub const FU_OP_REMW: u8 = 57;
-pub const FU_OP_REMUW: u8 = 58;
+pub const OP_ADD: u8 = 0;
+pub const OP_SUB: u8 = 1;
+pub const OP_ADDW: u8 = 2;
+pub const OP_SUBW: u8 = 3;
+pub const OP_XORL: u8 = 4;
+pub const OP_ORL: u8 = 5;
+pub const OP_ANDL: u8 = 6;
+pub const OP_SRA: u8 = 7;
+pub const OP_SRL: u8 = 8;
+pub const OP_SLL: u8 = 9;
+pub const OP_SRLW: u8 = 10;
+pub const OP_SLLW: u8 = 11;
+pub const OP_SRAW: u8 = 12;
+pub const OP_LTS: u8 = 13;
+pub const OP_LTU: u8 = 14;
+pub const OP_GES: u8 = 15;
+pub const OP_GEU: u8 = 16;
+pub const OP_EQ: u8 = 17;
+pub const OP_NE: u8 = 18;
+pub const OP_JALR: u8 = 19;
+pub const OP_BRANCH: u8 = 20;
+pub const OP_SLTS: u8 = 21;
+pub const OP_SLTU: u8 = 22;
+pub const OP_MRET: u8 = 23;
+pub const OP_SRET: u8 = 24;
+pub const OP_DRET: u8 = 25;
+pub const OP_ECALL: u8 = 26;
+pub const OP_WFI: u8 = 27;
+pub const OP_FENCE: u8 = 28;
+pub const OP_FENCE_I: u8 = 29;
+pub const OP_SFENCE_VMA: u8 = 30;
+pub const OP_CSR_WRITE: u8 = 31;
+pub const OP_CSR_READ: u8 = 32;
+pub const OP_CSR_SET: u8 = 33;
+pub const OP_CSR_CLEAR: u8 = 34;
+pub const OP_LD: u8 = 35;
+pub const OP_SD: u8 = 36;
+pub const OP_LW: u8 = 37;
+pub const OP_LWU: u8 = 38;
+pub const OP_SW: u8 = 39;
+pub const OP_LH: u8 = 40;
+pub const OP_LHU: u8 = 41;
+pub const OP_SH: u8 = 42;
+pub const OP_LB: u8 = 43;
+pub const OP_SB: u8 = 44;
+pub const OP_LBU: u8 = 45;
+pub const OP_MUL: u8 = 46;
+pub const OP_MULH: u8 = 47;
+pub const OP_MULHU: u8 = 48;
+pub const OP_MULHSU: u8 = 49;
+pub const OP_MULW: u8 = 50;
+pub const OP_DIV: u8 = 51;
+pub const OP_DIVU: u8 = 52;
+pub const OP_DIVW: u8 = 53;
+pub const OP_DIVUW: u8 = 54;
+pub const OP_REM: u8 = 55;
+pub const OP_REMU: u8 = 56;
+pub const OP_REMW: u8 = 57;
+pub const OP_REMUW: u8 = 58;
 
 pub const CF_T_NO_CF: u8 = 0;
 pub const CF_T_BRANCH: u8 = 1;
@@ -325,21 +326,21 @@ pub const LEN_EXCEPTION: usize = OFFSET_EXCEPTION_CAUSE + XLEN;
 
 // LEN_CF_T + VLEN
 pub struct BranchpredictSbeT {
-	pub cf: [bool; LEN_CF_T],
+	pub cf: [bool; LEN_CF],
 	pub predict_address: [bool; VLEN],
 }
 
 pub const OFFSET_BP_PREDICT_ADDRESS: usize = 0;
 pub const OFFSET_BP_CF: usize = OFFSET_BP_PREDICT_ADDRESS + VLEN;
-pub const LEN_BP: usize = OFFSET_BP_CF + LEN_CF_T;
+pub const LEN_BP: usize = OFFSET_BP_CF + LEN_CF;
 
 // VLEN + TRANS_ID_BITS + LEN_FU_T + LEN_FU_OP + REG_ADDR_SIZE * 3
 // + XLEN + 4 + (XLEN * 2 + 1) + (LEN_CF_T + VLEN) + 1
 pub struct ScoreboardEntryT {
 	pub pc: [bool; VLEN],
 	pub trans_id: [bool; TRANS_ID_BITS],
-	pub fu: [bool; LEN_FU_T],
-	pub op: [bool; LEN_FU_OP],
+	pub fu: [bool; LEN_FU],
+	pub op: [bool; LEN_OP],
 	pub rs1: [bool; REG_ADDR_SIZE],
 	pub rs2: [bool; REG_ADDR_SIZE],
 	pub rd: [bool; REG_ADDR_SIZE],
@@ -353,25 +354,9 @@ pub struct ScoreboardEntryT {
 	pub is_compressed: bool,
 }
 
-// pub const OFFSET_PC: usize = ID2IS_LEN - 1;
-// pub const OFFSET_TRANS_ID: usize = OFFSET_PC - VLEN;
-// pub const OFFSET_FU: usize = OFFSET_TRANS_ID + TRANS_ID_BITS;
-// pub const OFFSET_OP: usize = OFFSET_FU + LEN_FU_T;
-// pub const OFFSET_RS1: usize = OFFSET_OP + LEN_FU_OP;
-// pub const OFFSET_RS2: usize = OFFSET_RS1 + REG_ADDR_SIZE;
-// pub const OFFSET_RD: usize = OFFSET_RS2 + REG_ADDR_SIZE;
-// pub const OFFSET_RESULT: usize = OFFSET_RD + REG_ADDR_SIZE;
-// pub const OFFSET_VALID: usize = OFFSET_RESULT + XLEN;
-// pub const OFFSET_USE_IMM: usize = OFFSET_VALID + 1;
-// pub const OFFSET_USE_ZIMM: usize = OFFSET_USE_IMM + 1;
-// pub const OFFSET_USE_PC: usize = OFFSET_USE_ZIMM + 1;
-// pub const OFFSET_EX: usize = OFFSET_USE_PC + 1;
-// pub const OFFSET_BP: usize = OFFSET_EX + LEN_EXCEPTION;
-// pub const OFFSET_IS_COMPRESSED: usize = OFFSET_BP + LEN_BP;
-
 pub const OFFSET_PC: usize = OFFSET_TRANS_ID + TRANS_ID_BITS;
-pub const OFFSET_TRANS_ID: usize = OFFSET_FU + LEN_FU_T;
-pub const OFFSET_FU: usize = OFFSET_OP + LEN_FU_OP;
+pub const OFFSET_TRANS_ID: usize = OFFSET_FU + LEN_FU;
+pub const OFFSET_FU: usize = OFFSET_OP + LEN_OP;
 pub const OFFSET_OP: usize = OFFSET_RS1 + REG_ADDR_SIZE;
 pub const OFFSET_RS1: usize = OFFSET_RS2 + REG_ADDR_SIZE;
 pub const OFFSET_RS2: usize = OFFSET_RD + REG_ADDR_SIZE;
@@ -387,124 +372,29 @@ pub const OFFSET_IS_COMPRESSED: usize = 0;
 
 pub const LEN_SCOREBOARD_ENTRY: usize = OFFSET_PC + VLEN;
 
-#[repr(C, packed)]
-// 1 + (VLEN + TRANS_ID_BITS + LEN_FU_T + LEN_FU_OP + REG_ADDR_SIZE * 3
-// + XLEN + 4 + (XLEN * 2 + 1) + (LEN_CF_T + VLEN) + 1) + 1
+/// 0              1       ...               ...   312   LEN(313)
+/// [is_ctrl_flow, sbe.is_compressed, ... , sbe.pc, valid]
+pub const OFFSET_SCOREBOARD_ENTRY: usize = 1;
+
 pub struct IdPerIssueT {
 	pub valid: bool,
 	pub sbe: ScoreboardEntryT,
 	pub is_ctrl_flow: bool,
 }
 
-// 0              1       ...               ...   312   LEN(313)
-// [is_ctrl_flow, sbe.is_compressed, ... , sbe.pc, valid]
-pub const OFFSET_SCOREBOARD_ENTRY: usize = 1;
-
-#[repr(C, packed)]
-// (1 + (VLEN + TRANS_ID_BITS + LEN_FU_T + LEN_FU_OP + REG_ADDR_SIZE * 3
-// + XLEN + 4 + (XLEN * 2 + 1) + (LEN_CF_T + VLEN) + 1) + 1) * ISSUE_NUM
-pub struct inst_id2is_t {
+pub struct InstId2IsT {
 	issue_inst: [IdPerIssueT; ISSUE_NUM],
 }
 
 pub const ID2IS_LEN: usize = (1
 	+ (VLEN
 		+ TRANS_ID_BITS
-		+ LEN_FU_T
-		+ LEN_FU_OP
+		+ LEN_FU + LEN_OP
 		+ REG_ADDR_SIZE * 3
 		+ XLEN + 4
 		+ (XLEN * 2 + 1)
-		+ (LEN_CF_T + VLEN)
+		+ (LEN_CF + VLEN)
 		+ 1) + 1)
 	* ISSUE_NUM;
 
 // this is a const, e.g. 320 array write 313 flush to right, make it be 7
-pub const BYTE_ARRAY_OFFSET: usize = ((ID2IS_LEN / 8) as usize + 1) * 8 - ID2IS_LEN;
-
-/*
-input:
-@value : the value to be written to byte_array
-@width : [0...width-1] bit of value is to be written to byte_array
-@offset: index of (offset + BYTE_ARRAY_OFFSET)-th bit will be the first bit of byte_array to be written
-@byte_array : the array to be written
-
-See lab1/unit-test/write_variable.rs example to use it
-*/
-pub fn write_variable(
-	value: u64,
-	width: usize,
-	offset: usize, // consider this is 0--0ffset-1 used, offset+1 unused
-	byte_array: &mut [u8; (ID2IS_LEN / 8) as usize + 1],
-) {
-	println!(
-		"[RS] Writing {} with {} bits to {} offset",
-		value, width, offset
-	);
-	let target_l = (BYTE_ARRAY_OFFSET + offset) / 8 as usize;
-	let target_l_width = 8 - (BYTE_ARRAY_OFFSET + offset) % 8;
-	let target_r = (BYTE_ARRAY_OFFSET + offset + width) / 8 as usize;
-	let target_r_width = (BYTE_ARRAY_OFFSET + offset + width) % 8;
-	let mut mask: u8;
-	let mut bit_processed = target_l_width;
-	let mut value_byte: u8;
-	let flitered_value = value & (make_all_ones(width) as u64);
-	println!(
-		"debuglog:: at write_variable, flitered_value={0}",
-		flitered_value
-	);
-	{
-		mask = (make_all_ones(target_l_width) << (8 - target_l_width)) as u8;
-		value_byte =
-			((flitered_value & make_all_ones(target_l_width)) << (8 - target_l_width)) as u8;
-		println!(
-			"debuglog:: Processing leftwidth, tar_l_wid={0},tar_l={1},mask={2},valuebyte={3}",
-			target_l_width, target_l, mask, value_byte
-		);
-		write_byte(value_byte, mask, &mut byte_array[target_l]);
-	}
-	for i in target_l + 1..target_r {
-		mask = make_all_ones(8) as u8;
-		value_byte = get_range_bits(flitered_value, bit_processed, bit_processed + 8) as u8;
-		println!(
-			"debuglog:: Processing midwidth, i={0},mask={1},valuebyte={2}",
-			i, mask, value_byte
-		);
-		write_byte(value_byte, mask, &mut byte_array[i]);
-		bit_processed += 8;
-	}
-	if target_l < target_r {
-		mask = make_all_ones(target_r_width) as u8;
-		value_byte = (get_range_bits(flitered_value, bit_processed, width)
-			& make_all_ones(target_r_width)) as u8;
-		println!(
-			"debuglog:: Processing rightwidth, tar_r_wid={0},tar_r={1},mask={2},valuebyte={3},bitprocessed={4},getrangebit={5}",
-			target_r_width,
-			target_r,
-			mask,
-			value_byte,
-			bit_processed,
-			get_range_bits(flitered_value, bit_processed, width));
-		write_byte(value_byte, mask, &mut byte_array[target_r]);
-	}
-}
-
-fn write_byte(value: u8, mask: u8, tar: &mut u8) {
-	*tar = (value & mask) | ((*tar) & (!mask));
-}
-
-// note : return [left_side, right_side) bits of value, index for bit start from 0
-fn get_range_bits(value: u64, left_side: usize, right_side: usize) -> u64 {
-	// println!(
-	// 	"debuglog:: get_range_bits: value={0},left={1},rig={2}",
-	// 	value, left_side, right_side
-	// );
-	(value >> left_side) & make_all_ones(right_side - left_side)
-}
-
-fn make_all_ones(width: usize) -> u64 {
-	match width <= 63 {
-		true => (1 << width) - 1,
-		false => ((1 << 63) - 1) << 1 + 1,
-	}
-}

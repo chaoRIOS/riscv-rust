@@ -478,7 +478,7 @@ impl Cpu {
 		}
 	}
 
-	fn handle_exception(&mut self, exception: Trap, instruction_address: u64) {
+	pub fn handle_exception(&mut self, exception: Trap, instruction_address: u64) {
 		self.handle_trap(exception, instruction_address, false);
 	}
 
@@ -1397,17 +1397,20 @@ impl Cpu {
 }
 
 pub struct Instruction {
-	mask: u32,
-	data: u32, // @TODO: rename
-	name: &'static str,
-	cycles: u8,
-	operation: fn(cpu: &mut Cpu, word: u32, address: u64) -> Result<(), Trap>,
-	disassemble: fn(cpu: &mut Cpu, word: u32, address: u64, evaluate: bool) -> String,
+	pub mask: u32,
+	pub data: u32, // @TODO: rename
+	pub name: &'static str,
+	pub cycles: u8,
+	pub operation: fn(cpu: &mut Cpu, word: u32, address: u64) -> Result<(), Trap>,
+	pub disassemble: fn(cpu: &mut Cpu, word: u32, address: u64, evaluate: bool) -> String,
 }
 
 impl Instruction {
 	pub fn get_name(&self) -> &str {
 		self.name
+	}
+	pub fn get_cycles(&self) -> &u8 {
+		&self.cycles
 	}
 }
 
@@ -2066,7 +2069,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0x0000707f,
 		data: 0x00000063,
 		name: "BEQ",
-		cycles: 1,
+		cycles: 2,
 		operation: |cpu, word, address| {
 			let f = parse_format_b(word);
 			if cpu.sign_extend(cpu.x[f.rs1]) == cpu.sign_extend(cpu.x[f.rs2]) {
@@ -2080,7 +2083,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0x0000707f,
 		data: 0x00005063,
 		name: "BGE",
-		cycles: 1,
+		cycles: 2,
 		operation: |cpu, word, address| {
 			let f = parse_format_b(word);
 			if cpu.sign_extend(cpu.x[f.rs1]) >= cpu.sign_extend(cpu.x[f.rs2]) {
@@ -2094,7 +2097,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0x0000707f,
 		data: 0x00007063,
 		name: "BGEU",
-		cycles: 1,
+		cycles: 2,
 		operation: |cpu, word, address| {
 			let f = parse_format_b(word);
 			if cpu.unsigned_data(cpu.x[f.rs1]) >= cpu.unsigned_data(cpu.x[f.rs2]) {
@@ -2108,7 +2111,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0x0000707f,
 		data: 0x00004063,
 		name: "BLT",
-		cycles: 1,
+		cycles: 2,
 		operation: |cpu, word, address| {
 			let f = parse_format_b(word);
 			if cpu.sign_extend(cpu.x[f.rs1]) < cpu.sign_extend(cpu.x[f.rs2]) {
@@ -2122,7 +2125,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0x0000707f,
 		data: 0x00006063,
 		name: "BLTU",
-		cycles: 1,
+		cycles: 2,
 		operation: |cpu, word, address| {
 			let f = parse_format_b(word);
 			if cpu.unsigned_data(cpu.x[f.rs1]) < cpu.unsigned_data(cpu.x[f.rs2]) {
@@ -2136,7 +2139,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0x0000707f,
 		data: 0x00001063,
 		name: "BNE",
-		cycles: 1,
+		cycles: 2,
 		operation: |cpu, word, address| {
 			let f = parse_format_b(word);
 			if cpu.sign_extend(cpu.x[f.rs1]) != cpu.sign_extend(cpu.x[f.rs2]) {
@@ -2746,7 +2749,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0x0000007f,
 		data: 0x0000006f,
 		name: "JAL",
-		cycles: 1,
+		cycles: 2,
 		operation: |cpu, word, address| {
 			let f = parse_format_j(word);
 			cpu.x[f.rd] = cpu.sign_extend(cpu.pc as i64);
@@ -2759,7 +2762,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0x0000707f,
 		data: 0x00000067,
 		name: "JALR",
-		cycles: 1,
+		cycles: 2,
 		operation: |cpu, word, _address| {
 			let f = parse_format_i(word);
 			let tmp = cpu.sign_extend(cpu.pc as i64);

@@ -1,5 +1,7 @@
 #![allow(unused)]
 pub mod pkg;
+pub mod unittest;
+pub mod utils;
 
 use fnv::FnvHashMap;
 use pkg::*;
@@ -11,6 +13,7 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::Read;
 use std::ptr::NonNull;
+use utils::*;
 
 /// Dpi IF+ID(frontend) interface. Embedded an ELF parser and maintained
 /// readonly instruction memory space.
@@ -25,10 +28,15 @@ pub unsafe extern "C" fn dpi_fetch_decode(
 	is2id_ready_i: bool,
 	id2is_valid_o: &mut bool,
 	id2is_entry_o: &mut [u8; (ID2IS_LEN / 8) as usize + 1],
+	test_int: &mut u64,
 ) {
 	*id2is_valid_o = false;
 	for i in 0..(ID2IS_LEN / 8) as usize + 1 {
 		id2is_entry_o[i] = 0;
+	}
+
+	if is2id_ready_i == false {
+		return;
 	}
 
 	if let None = EMULATOR.symbol_map {
@@ -70,15 +78,32 @@ pub unsafe extern "C" fn dpi_fetch_decode(
 	match rst_ni {
 		true => {}
 		false => {
-			// EMULATOR.cpu.pc = boot_addr_i;
-			// EMULATOR.cpu.instruction_buffer = Vec::new();
+			#[cfg(debug_assertions)]
+			{
+				println!("[RS] PC {:x}", EMULATOR.cpu.pc);
+				println!("[RS] Boot PC {:x}", boot_addr_i);
+			}
+			EMULATOR.cpu.pc = boot_addr_i;
+			EMULATOR.cpu.instruction_buffer = Vec::new();
 		}
 	}
 
 	match flush_i {
 		true => {
-			// EMULATOR.cpu.pc = flush_pc_i.into();
-			// EMULATOR.cpu.instruction_buffer = Vec::new();
+			#[cfg(debug_assertions)]
+			{
+				println!("[RS] PC {:x}", EMULATOR.cpu.pc);
+				println!("[RS] Flush PC {:x}", flush_pc_i);
+				// if flush_pc_i > 0x7fffffff00 {
+				// 	*id2is_valid_o = true;
+				// 	for i in 0..(ID2IS_LEN / 8) as usize + 1 {
+				// 		id2is_entry_o[i] = 0xff;
+				// 	}
+				// 	return;
+				// }
+			}
+			EMULATOR.cpu.pc = flush_pc_i.into();
+			EMULATOR.cpu.instruction_buffer = Vec::new();
 		}
 		false => {}
 	}
@@ -107,10 +132,18 @@ pub unsafe extern "C" fn dpi_fetch_decode(
 	let instruction = match EMULATOR.cpu.decode(word) {
 		Ok(inst) => inst,
 		Err(()) => {
-			panic!(
-				"Unknown instruction PC:{:x} WORD:{:x}",
-				instruction_address, original_word
-			);
+			// panic!(
+			// 	"Unknown instruction PC:{:x} WORD:{:x}",
+			// 	instruction_address, original_word
+			// );
+			&Instruction {
+				mask: 0,
+				data: 0,
+				name: "NOP",
+				cycles: 0,
+				operation: |cpu, word, _address| Ok(()),
+				disassemble: |cpu, word, _address, evaluate| String::from("NOP"),
+			}
 		}
 	};
 
@@ -149,14 +182,14 @@ pub unsafe extern "C" fn dpi_fetch_decode(
 	{
 		Some(f) => write_variable(
 			*f as u64,
-			TRANS_ID_BITS,
-			OFFSET_SCOREBOARD_ENTRY + OFFSET_TRANS_ID,
+			LEN_FU,
+			OFFSET_SCOREBOARD_ENTRY + OFFSET_FU,
 			id2is_entry_o,
 		),
 		None => write_variable(
-			FU_T_NONE as u64,
-			TRANS_ID_BITS,
-			OFFSET_SCOREBOARD_ENTRY + OFFSET_TRANS_ID,
+			FU_NONE as u64,
+			LEN_FU,
+			OFFSET_SCOREBOARD_ENTRY + OFFSET_FU,
 			id2is_entry_o,
 		),
 	};
@@ -170,14 +203,14 @@ pub unsafe extern "C" fn dpi_fetch_decode(
 	{
 		Some(f) => write_variable(
 			*f as u64,
-			TRANS_ID_BITS,
-			OFFSET_SCOREBOARD_ENTRY + OFFSET_TRANS_ID,
+			LEN_OP,
+			OFFSET_SCOREBOARD_ENTRY + OFFSET_OP,
 			id2is_entry_o,
 		),
 		None => write_variable(
-			FU_OP_ADD as u64,
-			TRANS_ID_BITS,
-			OFFSET_SCOREBOARD_ENTRY + OFFSET_TRANS_ID,
+			OP_ADD as u64,
+			LEN_OP,
+			OFFSET_SCOREBOARD_ENTRY + OFFSET_OP,
 			id2is_entry_o,
 		),
 	};
@@ -196,7 +229,8 @@ pub unsafe extern "C" fn dpi_fetch_decode(
 	{
 		Some(f) => match f.as_str() {
 			"B" => {
-				// println!("[RS] Get B format");
+				#[cfg(debug_assertions)]
+				println!("[RS] Get B format");
 				let _b_format = parse_format_b(word);
 
 				write_variable(
@@ -219,12 +253,15 @@ pub unsafe extern "C" fn dpi_fetch_decode(
 					OFFSET_SCOREBOARD_ENTRY + OFFSET_RESULT,
 					id2is_entry_o,
 				);
+				*test_int = _b_format.imm as u64;
 			}
 			"I" => {
-				// println!("[RS] Get I format");
+				#[cfg(debug_assertions)]
+				println!("[RS] Get I format");
 				match instruction.get_name() {
 					"CSRRC" | "CSRRCI" | "CSRRS" | "CSRRW" | "CSRRWI" | "CSRRSI" => {
-						// println!("[RS] Get CSR format");
+						#[cfg(debug_assertions)]
+						println!("[RS] Get CSR format");
 						let _csr_format = parse_format_csr(word);
 
 						write_variable(
@@ -259,7 +296,8 @@ pub unsafe extern "C" fn dpi_fetch_decode(
 						}
 					}
 					_ => {
-						// println!("[RS] Get I format");
+						#[cfg(debug_assertions)]
+						println!("[RS] Get I format");
 						let _i_format = parse_format_i(word);
 
 						write_variable(
@@ -282,6 +320,7 @@ pub unsafe extern "C" fn dpi_fetch_decode(
 							OFFSET_SCOREBOARD_ENTRY + OFFSET_RESULT,
 							id2is_entry_o,
 						);
+						*test_int = _i_format.imm as u64;
 
 						//use_imm
 						write_variable(
@@ -294,7 +333,8 @@ pub unsafe extern "C" fn dpi_fetch_decode(
 				}
 			}
 			"J" => {
-				// println!("[RS] Get J format");
+				#[cfg(debug_assertions)]
+				println!("[RS] Get J format");
 				let _j_format = parse_format_j(word);
 
 				write_variable(
@@ -310,6 +350,7 @@ pub unsafe extern "C" fn dpi_fetch_decode(
 					OFFSET_SCOREBOARD_ENTRY + OFFSET_RESULT,
 					id2is_entry_o,
 				);
+				*test_int = _j_format.imm as u64;
 
 				//use_imm
 				write_variable(
@@ -320,7 +361,8 @@ pub unsafe extern "C" fn dpi_fetch_decode(
 				);
 			}
 			"R" => {
-				// println!("[RS] Get R format");
+				#[cfg(debug_assertions)]
+				println!("[RS] Get R format");
 				let _r_format = parse_format_r(word);
 
 				write_variable(
@@ -345,7 +387,8 @@ pub unsafe extern "C" fn dpi_fetch_decode(
 				);
 			}
 			"S" => {
-				// println!("[RS] Get S format");
+				#[cfg(debug_assertions)]
+				println!("[RS] Get S format");
 				let _s_format = parse_format_s(word);
 
 				write_variable(
@@ -368,6 +411,7 @@ pub unsafe extern "C" fn dpi_fetch_decode(
 					OFFSET_SCOREBOARD_ENTRY + OFFSET_RESULT,
 					id2is_entry_o,
 				);
+				*test_int = _s_format.imm as u64;
 
 				//use_imm
 				write_variable(
@@ -378,7 +422,8 @@ pub unsafe extern "C" fn dpi_fetch_decode(
 				);
 			}
 			"U" => {
-				// println!("[RS] Get U format");
+				#[cfg(debug_assertions)]
+				println!("[RS] Get U format");
 				let _u_format = parse_format_u(word);
 
 				write_variable(
@@ -394,6 +439,7 @@ pub unsafe extern "C" fn dpi_fetch_decode(
 					OFFSET_SCOREBOARD_ENTRY + OFFSET_RESULT,
 					id2is_entry_o,
 				);
+				*test_int = _u_format.imm as u64;
 
 				//use_imm
 				write_variable(
@@ -404,7 +450,8 @@ pub unsafe extern "C" fn dpi_fetch_decode(
 				);
 			}
 			_ => {
-				// println!("[RS] Get undefined {} format", f),
+				#[cfg(debug_assertions)]
+				println!("[RS] Get undefined {} format", f);
 			}
 		},
 		None => {}
@@ -418,6 +465,15 @@ pub unsafe extern "C" fn dpi_fetch_decode(
 		OFFSET_SCOREBOARD_ENTRY + OFFSET_VALID,
 		id2is_entry_o,
 	);
+	match instruction.get_name() {
+		"JAL" => write_variable(
+			0 as u64,
+			1,
+			OFFSET_SCOREBOARD_ENTRY + OFFSET_VALID,
+			id2is_entry_o,
+		),
+		_ => {}
+	}
 
 	// use_pc
 	match instruction.get_name() {
@@ -450,6 +506,7 @@ pub unsafe extern "C" fn dpi_fetch_decode(
 
 	// id2is_valid_o
 	*id2is_valid_o = true;
+	// *test_int = 0xaaaa_ffff_ffff_ffff;
 }
 
 /// Dpi EX(backend) interface.
@@ -463,7 +520,7 @@ pub unsafe extern "C" fn dpi_fetch_decode(
 ///
 /// to carry calculating results
 #[no_mangle]
-pub extern "C" fn dpi_issue_execute_writeback(
+pub unsafe extern "C" fn dpi_issue_execute_writeback(
 	_clk_i: bool,
 	rst_ni: bool,
 	flush_i: bool,
@@ -473,19 +530,129 @@ pub extern "C" fn dpi_issue_execute_writeback(
 	ex2io_load_o: &mut bool,
 	ex2io_store_o: &mut bool,
 	ex2io_data_o: &mut [u8; (XLEN / 8) as usize + 1],
-	ex2io_addr_o: &mut [u8; (XLEN / 8) as usize + 1],
+	ex2io_addr_o: &mut [u8; (PLEN / 8) as usize + 1],
 ) {
-	// let instr: &Instruction = match EMULATOR.get_cpu().decode_raw(data: u32) {
-	// 	Ok(i) => i,
-	// 	_ => panic!("decode failed"),
-	// };
+	// Check input signals
+	match rst_ni {
+		true => {}
+		false => {
+			// EMULATOR.cpu.pc = boot_addr_i;
+			// EMULATOR.cpu.instruction_buffer = Vec::new();
+		}
+	}
+
+	match flush_i {
+		true => {
+			// EMULATOR.cpu.pc = flush_pc_i.into();
+			// EMULATOR.cpu.instruction_buffer = Vec::new();
+		}
+		false => {}
+	}
+
+	match id2is_valid_i {
+		true => {
+			let instruction_address = 0x80000000 as u64;
+
+			// Fetch and decode
+			// Fetching
+			EMULATOR.cpu.pc = instruction_address;
+			let original_word = match EMULATOR.cpu.fetch() {
+				Ok(word) => word,
+				Err(e) => panic!("Failed to fetch original_word"),
+			};
+
+			// Parsing cache line
+			// use input.is_compressed
+			let word = match (original_word & 0x3) == 0x3 {
+				true => {
+					// EMULATOR.cpu.pc = EMULATOR.cpu.pc.wrapping_add(4); // 32-bit length non-compressed instruction
+					original_word
+				}
+				false => {
+					// EMULATOR.cpu.pc = EMULATOR.cpu.pc.wrapping_add(2); // 16-bit length compressed instruction
+					EMULATOR.cpu.uncompress(original_word & 0xffff)
+				}
+			};
+
+			// Decoding
+			let instruction = match EMULATOR.cpu.decode(word) {
+				Ok(inst) => inst,
+				Err(()) => {
+					panic!(
+						"Unknown instruction PC:{:x} WORD:{:x}",
+						instruction_address, original_word
+					);
+				}
+			};
+
+			// let cycles = instruction.get_cycles();
+
+			match instruction.get_name() {
+				"LB" | "LBU" | "LD" | "LH" | "LHU" | "LUI" | "LW" | "LWU" => {
+					*ex2io_load_o = true;
+					*ex2io_store_o = false;
+					for i in 0..ex2io_addr_o.len() {
+						ex2io_addr_o[i] = 0 << i * 8;
+					}
+					for i in 0..ex2io_data_o.len() {
+						ex2io_data_o[i] = 0 << i * 8;
+					}
+					match instruction.get_name() {
+						"LB" => {}
+						"LBU" => {}
+						"LD" => {}
+						"LH" => {}
+						"LHU" => {}
+						"LUI" => {}
+						"LW" => {}
+						"LWU" => {}
+						_ => {}
+					}
+				}
+				"SB" | "SD" | "SH" => {
+					*ex2io_load_o = false;
+					*ex2io_store_o = true;
+					for i in 0..ex2io_data_o.len() {
+						ex2io_data_o[i] = 0 << i * 8;
+					}
+					for i in 0..ex2io_addr_o.len() {
+						ex2io_addr_o[i] = 0 << i * 8;
+					}
+					match instruction.get_name() {
+						"SB" => {}
+						"SD" => {}
+						"SH" => {}
+						_ => {}
+					}
+				}
+				_ => {}
+			}
+
+			match (instruction.operation)(EMULATOR.get_mut_cpu(), word, instruction_address) {
+				Ok(()) => {}
+				Err(e) => EMULATOR
+					.get_mut_cpu()
+					.handle_exception(e, instruction_address),
+			}
+		}
+		false => {
+			*ex2io_load_o = false;
+			*ex2io_store_o = false;
+			for i in 0..ex2io_data_o.len() {
+				ex2io_data_o[i] = 0 << i * 8;
+			}
+			for i in 0..ex2io_addr_o.len() {
+				ex2io_addr_o[i] = 0 << i * 8;
+			}
+		}
+	}
 }
 
 /// Dpi MA(load/store) interface.
 ///
 /// @TODO: Determine impl
 #[no_mangle]
-pub extern "C" fn dpi_load_store(
+pub unsafe extern "C" fn dpi_load_store(
 	_clk_i: bool,
 	rst_ni: bool,
 	flush_i: bool,
