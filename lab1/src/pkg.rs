@@ -7,6 +7,7 @@ use riscv_emu_rust::mmu::*;
 use riscv_emu_rust::Emulator;
 use std::fs::File;
 use std::io::Read;
+use std::collections::HashMap; 
 use std::{mem, slice};
 
 /// GLOBAL EMULATOR.
@@ -31,6 +32,7 @@ pub static mut EMULATOR: Emulator = Emulator {
 				memory: Memory { data: vec![] },
 			},
 			mstatus: 0,
+			tlb: HashMap::new(),
 		},
 		reservation: 0,
 		is_reservation_set: false,

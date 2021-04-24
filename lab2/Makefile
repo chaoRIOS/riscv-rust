@@ -1,4 +1,4 @@
-WORK_DIR=/home/cwang/work
+WORK_DIR=/home/ychen/
 PROJ_DIR=$(WORK_DIR)/riscv-rust
 
 DRAMSIM_PATH=$(WORK_DIR)/DRAMSim2

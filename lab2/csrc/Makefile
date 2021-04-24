@@ -1,4 +1,4 @@
-WORK_DIR = /home/cwang/work
+WORK_DIR = /home/ychen/
 DRAMSIM_PATH = $(WORK_DIR)/DRAMSim2
 DRAMSIM_LIB = $(DRAMSIM_PATH)/libdramsim.so
 	

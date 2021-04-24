@@ -31,6 +31,7 @@ fn main() -> std::io::Result<()> {
 	let args: Vec<String> = env::args().collect();
 	// println!("{:?}", &args[1]);
 	// run_elf("/opt/orv64-merge/rrv64/tb/test_program/benchmarks/dhrystone.riscv")?;
+	println!("running lab1");
 	run_elf(&args[1])?;
 	// run_elf("/home/cwang/work/riscv-rust/lab1/test64.elf")?;
 	// println!("len:{}+({})", ID2IS_LEN, BYTE_ARRAY_OFFSET);

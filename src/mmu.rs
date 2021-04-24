@@ -4,6 +4,7 @@ pub const DRAM_BASE: u64 = 0x80000000;
 
 extern crate fnv;
 
+use std::collections::HashMap; 
 use cpu::{get_privilege_mode, PrivilegeMode, Trap, TrapType, Xlen};
 use memory::Memory;
 
@@ -23,7 +24,10 @@ pub struct Mmu {
 	/// Address translation can be affected `mstatus` (MPRV, MPP in machine mode)
 	/// then `Mmu` has copy of it.
 	pub mstatus: u64,
+	pub tlb:HashMap<u64,u64>,
 }
+
+
 
 pub enum AddressingMode {
 	None,
@@ -62,6 +66,7 @@ impl Mmu {
 			privilege_mode: PrivilegeMode::Machine,
 			memory: MemoryWrapper::new(),
 			mstatus: 0,
+			tlb:HashMap::new(),
 		}
 	}
 
@@ -612,8 +617,12 @@ impl Mmu {
 		access_type: &MemoryAccessType,
 	) -> Result<u64, ()> {
 		let address = self.get_effective_address(v_address);
+		//println!("detecter addr translate enter");
 		let p_address = match self.addressing_mode {
-			AddressingMode::None => Ok(address),
+			AddressingMode::None => {
+				println!("detecter NoneAddr mode");
+				Ok(address)
+			},
 			AddressingMode::SV32 => match self.privilege_mode {
 				// @TODO: Optimize
 				PrivilegeMode::Machine => match access_type {
@@ -637,20 +646,31 @@ impl Mmu {
 					},
 				},
 				PrivilegeMode::User | PrivilegeMode::Supervisor => {
+					println!("detecter privilegeMode SV32 User or Supervisor");
 					let vpns = [(address >> 12) & 0x3ff, (address >> 22) & 0x3ff];
-					self.traverse_page(address, 2 - 1, self.ppn, &vpns, &access_type)
+					self.tlb_or_pagewalk(address, 2 - 1, self.ppn, &vpns, &access_type)
 				}
-				_ => Ok(address),
+				_ => {
+					println!("detecter SV32 else");
+					Ok(address)
+				},
 			},
 			AddressingMode::SV39 => match self.privilege_mode {
 				// @TODO: Optimize
 				// @TODO: Remove duplicated code with SV32
 				PrivilegeMode::Machine => match access_type {
-					MemoryAccessType::Execute => Ok(address),
+					MemoryAccessType::Execute => {
+						println!("detecter SV39 Machinemode exc");
+						Ok(address)
+					},
 					// @TODO: Remove magic number
 					_ => match (self.mstatus >> 17) & 1 {
-						0 => Ok(address),
+						0 => {
+							println!("detecter SV39 mstatus >> 17");
+							Ok(address)
+						}, 
 						_ => {
+							println!("detecter SV39 Machinemode else");
 							let privilege_mode = get_privilege_mode((self.mstatus >> 9) & 3);
 							match privilege_mode {
 								PrivilegeMode::Machine => Ok(address),
@@ -666,14 +686,19 @@ impl Mmu {
 					},
 				},
 				PrivilegeMode::User | PrivilegeMode::Supervisor => {
+					println!("detecter privilegeMode SV39 User or Supervisor");
 					let vpns = [
 						(address >> 12) & 0x1ff,
 						(address >> 21) & 0x1ff,
 						(address >> 30) & 0x1ff,
 					];
-					self.traverse_page(address, 3 - 1, self.ppn, &vpns, &access_type)
+					
+					self.tlb_or_pagewalk(address, 3 - 1, self.ppn, &vpns, &access_type)
 				}
-				_ => Ok(address),
+				_ => {
+					println!("detecter SV39 else");
+					Ok(address)
+				},
 			},
 			AddressingMode::SV48 => {
 				panic!("AddressingMode SV48 is not supported yet.");
@@ -682,7 +707,35 @@ impl Mmu {
 		p_address
 	}
 
-	fn traverse_page(
+	fn tlb_entry_avaliable(
+		&mut self,
+		vpns: u64
+	) -> u64 {
+		match self.addressing_mode {
+			AddressingMode::SV32 => (self.tlb[&vpns] >> 32) & 1,
+			_=> (self.tlb[&vpns]>>54) & 1
+		}
+	}
+	
+	fn tlb_get_entry(
+		&mut self,
+		vpns: u64
+	) ->u64	{
+		match self.addressing_mode {
+			AddressingMode::SV32 => self.tlb[&vpns] & ((1 << 32) - 1),
+			_=>self.tlb[&vpns] & ((1 << 54) - 1)
+		}
+	}
+
+	fn tlb_update_entry(
+		&mut self,
+		vpns: u64,
+		new_pte: u64
+	) {
+		let value = new_pte | (1 << match self.addressing_mode {AddressingMode::SV32=>32,_=>54});
+		self.tlb.insert(vpns,value);
+	}
+	fn tlb_or_pagewalk(
 		&mut self,
 		v_address: u64,
 		level: u8,
@@ -696,9 +749,39 @@ impl Mmu {
 			_ => 8,
 		};
 		let pte_address = parent_ppn * pagesize + vpns[level as usize] * ptesize;
+		let vpn = match self.addressing_mode {
+			AddressingMode::SV32=>(vpns[0] << 12) | (vpns[1] << 22),
+			AddressingMode::SV39=>(vpns[0] << 12 | vpns[1] << 21 << vpns[2] << 30),
+			_=>(vpns[0] << 12 | vpns[1] << 21 << vpns[2] << 30)
+		} as u64;
 		let pte = match self.addressing_mode {
-			AddressingMode::SV32 => self.load_word_raw(pte_address) as u64,
-			_ => self.load_doubleword_raw(pte_address),
+			AddressingMode::SV32 => match self.tlb_entry_avaliable(vpn) {
+				1=>self.tlb_get_entry(vpn),
+				_=>{
+					let tmp = self.load_word_raw(pte_address) as u64;
+					let tmp_x = (tmp >> 3) & 1;
+					let tmp_w = (tmp >> 2) & 1;
+					let tmp_r = (tmp >> 1) & 1;
+					if tmp_x != 0 || tmp_r != 0 || tmp_w != 0 { // a leaf PTE
+						self.tlb_update_entry(vpn,tmp);
+					}
+					tmp
+				},
+
+			},  
+			_ => match self.tlb_entry_avaliable(vpn) {
+				1=>self.tlb_get_entry(vpn),
+				_=>{
+					let tmp = self.load_doubleword_raw(pte_address);
+					let tmp_x = (tmp >> 3) & 1;
+					let tmp_w = (tmp >> 2) & 1;
+					let tmp_r = (tmp >> 1) & 1;
+					if tmp_x != 0 || tmp_r != 0 || tmp_w != 0 {
+						self.tlb_update_entry(vpn,tmp);
+					}
+					tmp
+				},
+			} 
 		};
 		let ppn = match self.addressing_mode {
 			AddressingMode::SV32 => (pte >> 10) & 0x3fffff,
@@ -732,7 +815,7 @@ impl Mmu {
 		if r == 0 && x == 0 {
 			return match level {
 				0 => Err(()),
-				_ => self.traverse_page(v_address, level - 1, ppn, vpns, access_type),
+				_ => self.tlb_or_pagewalk(v_address, level - 1, ppn, vpns, access_type),
 			};
 		}
 
