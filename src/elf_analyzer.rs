@@ -656,11 +656,7 @@ impl ElfAnalyzer {
 		program_data_section_headers: &Vec<&SectionHeader>,
 		string_table_section_headers: &Vec<&SectionHeader>,
 	) -> Option<u64> {
-		// This header is configured for lab1's ELF file only.
-		let tohost_values = vec![0x2e]; // ".\null"
-
-		// let tohost_values = vec![0x2e, 0x73, 0x62, 0x73, 0x73, 0x00]; // ".sbss\null"
-		// let tohost_values = vec![0x2e, 0x74, 0x6f, 0x68, 0x6f, 0x73, 0x74, 0x00]; // ".tohost\null"
+		let tohost_values = vec![0x2e, 0x74, 0x6f, 0x68, 0x6f, 0x73, 0x74, 0x00]; // ".tohost\null"
 
 		for i in 0..program_data_section_headers.len() {
 			let sh_addr = program_data_section_headers[i].sh_addr;
