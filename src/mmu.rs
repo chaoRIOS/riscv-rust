@@ -373,13 +373,15 @@ impl Mmu {
 					let cache_line = match self.l1_cache.read_line(p_address) {
 						Ok(cache_line) => {
 							// hit
-							self.clock = self.clock.wrapping_add(L1_CACHE_CHECK_LATENCY as u64);
+							self.clock = self.clock.wrapping_add(L1_CACHE_HIT_LATENCY as u64);
+							self.l1_cache.hit_num += 1;
 							cache_line
 						}
 						Err(()) => {
 							// miss
 							// miss_handler guarantees to feed a line
-							self.clock = self.clock.wrapping_add(L1_CACHE_CHECK_LATENCY as u64);
+							self.clock = self.clock.wrapping_add(L1_CACHE_HIT_LATENCY as u64);
+							self.l1_cache.miss_num += 1;
 							self.l1_miss_handler(p_address).unwrap()
 						}
 					};
@@ -477,12 +479,14 @@ impl Mmu {
 					let _way = match self.l1_cache.read_line_info(p_address) {
 						Ok(_way) => {
 							// hit
-							self.clock = self.clock.wrapping_add(L1_CACHE_CHECK_LATENCY as u64);
+							self.clock = self.clock.wrapping_add(L1_CACHE_HIT_LATENCY as u64);
+							self.l1_cache.hit_num += 1;
 							_way
 						}
 						Err(()) => {
 							// miss
-							self.clock = self.clock.wrapping_add(L1_CACHE_CHECK_LATENCY as u64);
+							self.clock = self.clock.wrapping_add(L1_CACHE_HIT_LATENCY as u64);
+							self.l1_cache.miss_num += 1;
 							// miss_handler guarantees to feed a line
 							self.l1_miss_handler_way(p_address).unwrap()
 						}

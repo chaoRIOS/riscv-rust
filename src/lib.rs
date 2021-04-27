@@ -15,8 +15,9 @@ pub mod l1cache;
 pub mod memory;
 pub mod mmu;
 
-use cpu::{Cpu, Xlen};
+use cpu::{Cpu, Xlen, CSR_HPMCOUNTER3_ADDRESS, CSR_HPMCOUNTER4_ADDRESS, CSR_MCYCLE_ADDRESS};
 use elf_analyzer::ElfAnalyzer;
+use l1cache::L1_CACHE_HIT_LATENCY;
 
 /// RISC-V emulator. It emulates RISC-V CPU and peripheral devices.
 ///
@@ -152,9 +153,22 @@ impl Emulator {
 			self.tick();
 		}
 
-		let _csr_mcycle_address: u16 = 0xb00;
-		let _latency = self.get_cpu().read_csr_raw(_csr_mcycle_address);
-		println!("Latency = {} cycles", _latency);
+		println!(
+			"Latency = {} cycles",
+			self.get_cpu().read_csr_raw(CSR_MCYCLE_ADDRESS)
+		);
+		let hit_num = self.get_cpu().read_csr_raw(CSR_HPMCOUNTER3_ADDRESS);
+		let miss_num = self.get_cpu().read_csr_raw(CSR_HPMCOUNTER4_ADDRESS);
+
+		println!(
+			"Cache Hit rate = {}%",
+			((hit_num * 100) as f32 / (hit_num + miss_num) as f32) as f32
+		);
+		println!(
+			"Cache Miss rate = {}%",
+			((miss_num * 100) as f32 / (hit_num + miss_num) as f32) as f32
+		);
+		println!("Cache Hit Latency = {} cycles", L1_CACHE_HIT_LATENCY);
 	}
 
 	/// Method for running [`riscv-tests`](https://github.com/riscv/riscv-tests) program.

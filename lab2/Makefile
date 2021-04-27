@@ -1,25 +1,9 @@
-WORK_DIR=/home/cwang/work
-PROJ_DIR=$(WORK_DIR)/riscv-rust
-
-DRAMSIM_PATH=$(WORK_DIR)/DRAMSim2
-
-DEBUG_PATH=$(PROJ_DIR)/target/debug
-RELEASE_PATH=$(PROJ_DIR)/target/release
+COREMARK_PATH = /home/zfu/rios/apd_from_lab1/apd/tb/test_program/coremark/coremark.riscv
+DHRYSTONE_PATH = /home/zfu/rios/apd_from_lab1/apd/tb/test_program/coremark/coremark.riscv
 
 
-run: build
-	LD_LIBRARY_PATH=$(PROJ_DIR)/lab2/csrc $(DEBUG_PATH)/lab2
+run_coremark:
+	cargo run --release -- -i $(COREMARK_PATH)
 
-build: $(DRAMSIM_LIB)
-	$(MAKE) -C csrc dramsim_interface
-	RUSTFLAGS="-L $(PROJ_DIR)/lab2/csrc" cargo build
-
-
-release: 
-	RUSTFLAGS="-L $(DRAMSIM_PATH)" cargo build --release
-	LD_LIBRARY_PATH=$(DRAMSIM_PATH) $(RELEASE_PATH)/lab2
-
-test: 
-	$(MAKE) -C csrc test
-	RUSTFLAGS="-L $(PROJ_DIR)/lab2/csrc" cargo build
-	LD_LIBRARY_PATH="$(PROJ_DIR)/lab2/csrc" $(DEBUG_PATH)/lab2
+run_dhrystone:
+	cargo run --release -- -i $(DHRYSTONE_PATH)

@@ -39,6 +39,8 @@ pub static mut EMULATOR: Emulator = Emulator {
 						data_blocks: [0 as u8; L1_CACHE_BLOCK_SIZE as usize],
 					}; L1_SET_ASSOCIATIVE_WAY as usize],
 				}; (L1_CACHE_SIZE / (L1_CACHE_BLOCK_SIZE * L1_SET_ASSOCIATIVE_WAY)) as usize],
+				hit_num: 0,
+				miss_num: 0,
 			},
 			mstatus: 0,
 		},
