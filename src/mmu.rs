@@ -5,6 +5,7 @@ pub const DRAM_BASE: u64 = 0x80000000;
 extern crate fnv;
 
 use cpu::{get_privilege_mode, PrivilegeMode, Trap, TrapType, Xlen};
+use l1cache::*;
 use memory::Memory;
 
 /// Emulates Memory Management Unit. It holds the Main memory and peripheral
@@ -19,6 +20,7 @@ pub struct Mmu {
 	pub addressing_mode: AddressingMode,
 	pub privilege_mode: PrivilegeMode,
 	pub memory: MemoryWrapper,
+	pub l1_cache: L1Cache,
 
 	/// Address translation can be affected `mstatus` (MPRV, MPP in machine mode)
 	/// then `Mmu` has copy of it.
@@ -61,6 +63,7 @@ impl Mmu {
 			addressing_mode: AddressingMode::None,
 			privilege_mode: PrivilegeMode::Machine,
 			memory: MemoryWrapper::new(),
+			l1_cache: L1Cache::new(),
 			mstatus: 0,
 		}
 	}
@@ -176,6 +179,114 @@ impl Mmu {
 		}
 	}
 
+	/// Refill 1 missing line to cache
+	///
+	/// # Arguments
+	/// * `p_address`: physical address
+	fn miss_handler(&mut self, p_address: u64) -> Result<L1CacheLine, ()> {
+		let index: u64 = (p_address >> L1_CACHE_OFFSET_BITS) & ((1 << L1_CACHE_INDEX_BITS) - 1);
+		let _way = self
+			.l1_cache
+			.allocate_new_line(index, PlacementPolicy::Random);
+		let _victim = self.l1_cache.data[index as usize].data[_way as usize];
+
+		// Detect victim cache line
+		// write back the victim
+		match _victim.valid {
+			true => {
+				let mut _write_back_address = 0 as u64;
+				// [ tag | index | 000000 ]
+				_write_back_address = _write_back_address
+					| (_victim.tag << (L1_CACHE_INDEX_BITS + L1_CACHE_OFFSET_BITS))
+					| (index << L1_CACHE_OFFSET_BITS);
+
+				// Reuse current memory interface
+				// @TODO: optimize
+				for i in 0..(L1_CACHE_BLOCK_SIZE / 8) as u64 {
+					self.memory
+						.write_doubleword(_write_back_address + i * 8, _victim.get(i * 8, 8));
+				}
+			}
+			false => {}
+		}
+
+		// Access memory
+
+		// @TODO : optimize
+		// Align cache line
+		let _p_address = (p_address >> L1_CACHE_OFFSET_BITS) << L1_CACHE_OFFSET_BITS;
+		#[cfg(debug_assertions)]
+		println!("refill from {:x}", _p_address);
+
+		// Refill new cache line
+		let mut _new_line = L1CacheLine::new();
+		_new_line.valid = true;
+		_new_line.tag = _p_address >> (L1_CACHE_INDEX_BITS + L1_CACHE_OFFSET_BITS);
+		for i in 0..L1_CACHE_BLOCK_SIZE {
+			_new_line.data_blocks[i as usize] = self.load_raw(_p_address + i as u64);
+		}
+
+		// Place and return new cache line
+		#[cfg(debug_assertions)]
+		println!("refill[{}][{}]: {:x?}", index, _way, _new_line.data_blocks);
+		self.l1_cache.data[index as usize].data[_way as usize] = _new_line;
+		Ok(_new_line)
+	}
+
+	/// Refill 1 missing line to cache
+	///
+	/// # Arguments
+	/// * `p_address`: physical address
+	fn miss_handler_way(&mut self, p_address: u64) -> Result<u64, ()> {
+		let index: u64 = (p_address >> L1_CACHE_OFFSET_BITS) & ((1 << L1_CACHE_INDEX_BITS) - 1);
+		let _way = self
+			.l1_cache
+			.allocate_new_line(index, PlacementPolicy::Random);
+		let _victim = self.l1_cache.data[index as usize].data[_way as usize];
+
+		// Detect victim cache line
+		// write back the victim
+		match _victim.valid {
+			true => {
+				let mut _write_back_address = 0 as u64;
+				// [ tag | index | 000000 ]
+				_write_back_address = _write_back_address
+					| (_victim.tag << (L1_CACHE_INDEX_BITS + L1_CACHE_OFFSET_BITS))
+					| (index << L1_CACHE_OFFSET_BITS);
+
+				// Reuse current memory interface
+				// @TODO: optimize
+				for i in 0..(L1_CACHE_BLOCK_SIZE / 8) as u64 {
+					self.memory
+						.write_doubleword(_write_back_address + i * 8, _victim.get(i * 8, 8));
+				}
+			}
+			false => {}
+		}
+
+		// Access memory
+
+		// @TODO : optimize
+		// Align cache line
+		let _p_address = (p_address >> L1_CACHE_OFFSET_BITS) << L1_CACHE_OFFSET_BITS;
+		#[cfg(debug_assertions)]
+		println!("refill from {:x}", _p_address);
+
+		// Refill new cache line
+		let mut _new_line = L1CacheLine::new();
+		_new_line.valid = true;
+		_new_line.tag = _p_address >> (L1_CACHE_INDEX_BITS + L1_CACHE_OFFSET_BITS);
+		for i in 0..L1_CACHE_BLOCK_SIZE {
+			_new_line.data_blocks[i as usize] = self.load_raw(_p_address + i as u64);
+		}
+
+		// Place and return new cache line
+		#[cfg(debug_assertions)]
+		println!("refill[{}][{}]: {:x?}", index, _way, _new_line.data_blocks);
+		self.l1_cache.data[index as usize].data[_way as usize] = _new_line;
+		Ok(_way as u64)
+	}
+
 	/// Fetches instruction 8 bytes(64bits). This method takes virtual address
 	/// and translates into physical address inside.
 	///
@@ -225,22 +336,6 @@ impl Mmu {
 		}
 	}
 
-	/// Loads an byte. This method takes virtual address and translates
-	/// into physical address inside.
-	///
-	/// # Arguments
-	/// * `v_address` Virtual address
-	pub fn load(&mut self, v_address: u64) -> Result<u8, Trap> {
-		let effective_address = self.get_effective_address(v_address);
-		match self.translate_address(effective_address, &MemoryAccessType::Read) {
-			Ok(p_address) => Ok(self.load_raw(p_address)),
-			Err(()) => Err(Trap {
-				trap_type: TrapType::LoadPageFault,
-				value: v_address,
-			}),
-		}
-	}
-
 	/// Loads multiple bytes. This method takes virtual address and translates
 	/// into physical address inside.
 	///
@@ -256,15 +351,22 @@ impl Mmu {
 		match (v_address & 0xfff) <= (0x1000 - width) {
 			true => match self.translate_address(v_address, &MemoryAccessType::Read) {
 				Ok(p_address) => {
-					// Fast path. All bytes fetched are in the same page so
-					// translating an address only once.
-					match width {
-						1 => Ok(self.load_raw(p_address) as u64),
-						2 => Ok(self.load_halfword_raw(p_address) as u64),
-						4 => Ok(self.load_word_raw(p_address) as u64),
-						8 => Ok(self.load_doubleword_raw(p_address)),
-						_ => panic!("Width must be 1, 2, 4, or 8. {:X}", width),
-					}
+					#[cfg(debug_assertions)]
+					println!("\nload {} @ 0x{:x}", width, p_address);
+					let cache_line = match self.l1_cache.read_line(p_address) {
+						Ok(cache_line) => {
+							// hit
+							cache_line
+						}
+						Err(()) => {
+							// miss
+							// miss_handler guarantees to feed a line
+							self.miss_handler(p_address).unwrap()
+						}
+					};
+
+					let offset = p_address & ((1 << L1_CACHE_OFFSET_BITS) - 1);
+					Ok(cache_line.get(offset, width))
 				}
 				Err(()) => Err(Trap {
 					trap_type: TrapType::LoadPageFault,
@@ -281,6 +383,18 @@ impl Mmu {
 				}
 				Ok(data)
 			}
+		}
+	}
+
+	/// Loads an byte. This method takes virtual address and translates
+	/// into physical address inside.
+	///
+	/// # Arguments
+	/// * `v_address` Virtual address
+	pub fn load(&mut self, v_address: u64) -> Result<u8, Trap> {
+		match self.load_bytes(v_address, 1) {
+			Ok(data) => Ok(data as u8),
+			Err(e) => Err(e),
 		}
 	}
 
@@ -320,25 +434,6 @@ impl Mmu {
 		}
 	}
 
-	/// Store an byte. This method takes virtual address and translates
-	/// into physical address inside.
-	///
-	/// # Arguments
-	/// * `v_address` Virtual address
-	/// * `value`
-	pub fn store(&mut self, v_address: u64, value: u8) -> Result<(), Trap> {
-		match self.translate_address(v_address, &MemoryAccessType::Write) {
-			Ok(p_address) => {
-				self.store_raw(p_address, value);
-				Ok(())
-			}
-			Err(()) => Err(Trap {
-				trap_type: TrapType::StorePageFault,
-				value: v_address,
-			}),
-		}
-	}
-
 	/// Stores multiple bytes. This method takes virtual address and translates
 	/// into physical address inside.
 	///
@@ -355,15 +450,31 @@ impl Mmu {
 		match (v_address & 0xfff) <= (0x1000 - width) {
 			true => match self.translate_address(v_address, &MemoryAccessType::Write) {
 				Ok(p_address) => {
-					// Fast path. All bytes fetched are in the same page so
-					// translating an address only once.
-					match width {
-						1 => self.store_raw(p_address, value as u8),
-						2 => self.store_halfword_raw(p_address, value as u16),
-						4 => self.store_word_raw(p_address, value as u32),
-						8 => self.store_doubleword_raw(p_address, value),
-						_ => panic!("Width must be 1, 2, 4, or 8. {:X}", width),
-					}
+					// Store to cache
+					// @TODO: store buffer
+					// Get allocated cache line's way index
+					#[cfg(debug_assertions)]
+					println!("\nstore {} @ 0x{:x}", width, p_address);
+					let _way = match self.l1_cache.read_line_info(p_address) {
+						Ok(_way) => {
+							// hit
+							_way
+						}
+						Err(()) => {
+							// miss
+							// miss_handler guarantees to feed a line
+							self.miss_handler_way(p_address).unwrap()
+						}
+					};
+
+					let index: u64 =
+						(p_address >> L1_CACHE_OFFSET_BITS) & ((1 << L1_CACHE_INDEX_BITS) - 1);
+					let offset = p_address & ((1 << L1_CACHE_OFFSET_BITS) - 1);
+
+					// Update cache line
+					self.l1_cache.data[index as usize].data[_way as usize]
+						.set(offset, width, value);
+
 					Ok(())
 				}
 				Err(()) => Err(Trap {
@@ -381,6 +492,16 @@ impl Mmu {
 				Ok(())
 			}
 		}
+	}
+
+	/// Store an byte. This method takes virtual address and translates
+	/// into physical address inside.
+	///
+	/// # Arguments
+	/// * `v_address` Virtual address
+	/// * `value`
+	pub fn store(&mut self, v_address: u64, value: u8) -> Result<(), Trap> {
+		self.store_bytes(v_address, value as u64, 1)
 	}
 
 	/// Stores two bytes. This method takes virtual address and translates

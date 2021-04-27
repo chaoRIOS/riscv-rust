@@ -3,6 +3,7 @@ const TEST_MEMORY_CAPACITY: u64 = 1024 * 512;
 const PROGRAM_MEMORY_CAPACITY: u64 = 1024 * 1024 * 128; // big enough to run Linux and xv6
 
 extern crate fnv;
+extern crate rand;
 
 use self::fnv::FnvHashMap;
 use std::collections::HashMap;
@@ -10,6 +11,7 @@ use std::str;
 
 pub mod cpu;
 pub mod elf_analyzer;
+pub mod l1cache;
 pub mod memory;
 pub mod mmu;
 
