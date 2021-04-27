@@ -30,14 +30,6 @@ impl L1CacheLine {
 		}
 	}
 
-	pub const fn const_new() -> L1CacheLine {
-		L1CacheLine {
-			valid: false,
-			tag: 0 as u64,
-			data_blocks: [0 as u8; L1_CACHE_BLOCK_SIZE as usize],
-		}
-	}
-
 	pub fn get(&self, offset: u64, width: u64) -> u64 {
 		let mut value: u64 = 0;
 		assert_eq!((width > 0) && (width <= 64), true);
