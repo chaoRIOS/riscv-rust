@@ -10,10 +10,17 @@ pub const L1_CACHE_SIZE: i32 = 32768;
 /// 8-way set-associative
 pub const L1_SET_ASSOCIATIVE_WAY: i32 = 8;
 
+/// number of sets
+pub const L1_CACHE_SET_NUMBER: i32 = L1_CACHE_SIZE / (L1_CACHE_BLOCK_SIZE * L1_SET_ASSOCIATIVE_WAY);
+
 /// L1 cache line format
 pub const L1_CACHE_OFFSET_BITS: i32 = 6;
 pub const L1_CACHE_INDEX_BITS: i32 = 6;
 pub const L1_CACHE_TAG_BITS: i32 = 32 - L1_CACHE_OFFSET_BITS - L1_CACHE_INDEX_BITS;
+
+/// 64B cache block size
+pub const L1_CACHE_CHECK_LATENCY: i32 = 1;
+pub const L1_CACHE_MISS_LATENCY: i32 = 100;
 
 #[derive(Copy, Clone)]
 pub struct L1CacheLine {
@@ -79,8 +86,7 @@ pub struct L1Cache {
 impl L1Cache {
 	pub fn new() -> L1Cache {
 		L1Cache {
-			data: [L1CacheSet::new();
-				(L1_CACHE_SIZE / (L1_CACHE_BLOCK_SIZE * L1_SET_ASSOCIATIVE_WAY)) as usize],
+			data: [L1CacheSet::new(); L1_CACHE_SET_NUMBER as usize],
 		}
 	}
 

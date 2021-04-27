@@ -1,5 +1,5 @@
 // @TODO: temporal
-const TEST_MEMORY_CAPACITY: u64 = 1024 * 512;
+const TEST_MEMORY_CAPACITY: u64 = 1024 * 1024 * 512;
 const PROGRAM_MEMORY_CAPACITY: u64 = 1024 * 1024 * 128; // big enough to run Linux and xv6
 
 extern crate fnv;
@@ -88,76 +88,52 @@ impl Emulator {
 				self.put_bytes_to_terminal(disas.as_bytes());
 				self.put_bytes_to_terminal(&[10]); // new line
 			}
+
 			let tohost_data_addr = match self.cpu.get_mut_mmu().load_word(self.tohost_addr) {
-				Ok(data) => data,
+				Ok(data) => {
+					self.cpu.clock = self.cpu.clock.wrapping_sub(1);
+					data
+				}
 				Err(e) => {
 					self.cpu.handle_exception(e, self.cpu.read_pc());
 					0
 				}
 			};
+			// use raw interfaces to reserve clock cycles
 			if tohost_data_addr != 0 {
 				match tohost_data_addr {
 					0..=0x80000000 => {
 						break;
 					}
 					_ => {
-						// let disas = self.cpu.disassemble_next_instruction();
-						// self.put_bytes_to_terminal(disas.as_bytes());
-						// self.put_bytes_to_terminal(&[10]); // new line
-
 						// @TODO: optimize
-						let flag1 = match self
+						let flag1 = self
 							.cpu
 							.get_mut_mmu()
-							.load_word((24 + tohost_data_addr) as u64)
-						{
-							Ok(data) => data != 0,
-							_ => false,
-						};
-						let flag2 = match self
+							.load_word_raw((24 + tohost_data_addr) as u64)
+							!= 0;
+						let flag2 = self
 							.cpu
 							.get_mut_mmu()
-							.load_word((28 + tohost_data_addr) as u64)
-						{
-							Ok(data) => data != 0,
-							_ => false,
-						};
+							.load_word_raw((28 + tohost_data_addr) as u64)
+							!= 0;
 						if flag1 || flag2 {
-							let base = match self
+							let base = self
 								.cpu
 								.get_mut_mmu()
-								.load_word((4 * 4 + tohost_data_addr) as u64)
-							{
-								Ok(data) => data,
-								Err(e) => {
-									self.cpu.handle_exception(e, self.cpu.read_pc());
-									0
-								}
-							};
-							let length = match self
+								.load_word_raw((4 * 4 + tohost_data_addr) as u64);
+							let length = self
 								.cpu
 								.get_mut_mmu()
-								.load_word((6 * 4 + tohost_data_addr) as u64)
-							{
-								Ok(data) => data,
-								Err(e) => {
-									self.cpu.handle_exception(e, self.cpu.read_pc());
-									0
-								}
-							};
+								.load_word_raw((6 * 4 + tohost_data_addr) as u64);
 							for i in 0..length {
-								let data = match self.cpu.get_mut_mmu().load((i + base) as u64) {
-									Ok(data) => data,
-									Err(e) => {
-										self.cpu.handle_exception(e, self.cpu.read_pc());
-										0
-									}
-								};
+								let data = self.cpu.get_mut_mmu().load_raw((i + base) as u64);
 								print!("{}", data as char);
 							}
 						}
 
 						// After printf, set 1 to fromhost and set 0 to tohost
+						// Note: host needs to access cache instead of memory!
 						match self
 							.cpu
 							.get_mut_mmu()

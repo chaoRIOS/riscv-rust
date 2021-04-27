@@ -85,8 +85,10 @@ impl Mmu {
 	}
 
 	/// Runs one cycle of MMU and peripheral devices.
-	pub fn tick(&mut self, _mip: &mut u64) {
-		self.clock = self.clock.wrapping_add(1);
+	pub fn tick(&mut self, _mip: &mut u64) -> u64 {
+		let mmu_latency = self.clock;
+		self.clock = 0;
+		mmu_latency as u64
 	}
 
 	/// Updates addressing mode
@@ -179,11 +181,31 @@ impl Mmu {
 		}
 	}
 
+	/// Write back method for l1 cache
+	///
+	/// # Arguments
+	/// * `victim_cache_line`: the line needs to be written back
+	/// * `index`: index of the line
+	fn l1_write_back(&mut self, victim_cache_line: L1CacheLine, index: u64) {
+		let mut _write_back_address = 0 as u64;
+		// [ tag | index | 000000 ]
+		_write_back_address = _write_back_address
+			| (victim_cache_line.tag << (L1_CACHE_INDEX_BITS + L1_CACHE_OFFSET_BITS))
+			| (index << L1_CACHE_OFFSET_BITS);
+
+		// Reuse current memory interface
+		// @TODO: optimize
+		for i in 0..(L1_CACHE_BLOCK_SIZE / 8) as u64 {
+			self.memory
+				.write_doubleword(_write_back_address + i * 8, victim_cache_line.get(i * 8, 8));
+		}
+	}
+
 	/// Refill 1 missing line to cache
 	///
 	/// # Arguments
 	/// * `p_address`: physical address
-	fn miss_handler(&mut self, p_address: u64) -> Result<L1CacheLine, ()> {
+	fn l1_miss_handler(&mut self, p_address: u64) -> Result<L1CacheLine, ()> {
 		let index: u64 = (p_address >> L1_CACHE_OFFSET_BITS) & ((1 << L1_CACHE_INDEX_BITS) - 1);
 		let _way = self
 			.l1_cache
@@ -194,18 +216,7 @@ impl Mmu {
 		// write back the victim
 		match _victim.valid {
 			true => {
-				let mut _write_back_address = 0 as u64;
-				// [ tag | index | 000000 ]
-				_write_back_address = _write_back_address
-					| (_victim.tag << (L1_CACHE_INDEX_BITS + L1_CACHE_OFFSET_BITS))
-					| (index << L1_CACHE_OFFSET_BITS);
-
-				// Reuse current memory interface
-				// @TODO: optimize
-				for i in 0..(L1_CACHE_BLOCK_SIZE / 8) as u64 {
-					self.memory
-						.write_doubleword(_write_back_address + i * 8, _victim.get(i * 8, 8));
-				}
+				self.l1_write_back(_victim, index);
 			}
 			false => {}
 		}
@@ -237,7 +248,7 @@ impl Mmu {
 	///
 	/// # Arguments
 	/// * `p_address`: physical address
-	fn miss_handler_way(&mut self, p_address: u64) -> Result<u64, ()> {
+	fn l1_miss_handler_way(&mut self, p_address: u64) -> Result<u64, ()> {
 		let index: u64 = (p_address >> L1_CACHE_OFFSET_BITS) & ((1 << L1_CACHE_INDEX_BITS) - 1);
 		let _way = self
 			.l1_cache
@@ -248,18 +259,7 @@ impl Mmu {
 		// write back the victim
 		match _victim.valid {
 			true => {
-				let mut _write_back_address = 0 as u64;
-				// [ tag | index | 000000 ]
-				_write_back_address = _write_back_address
-					| (_victim.tag << (L1_CACHE_INDEX_BITS + L1_CACHE_OFFSET_BITS))
-					| (index << L1_CACHE_OFFSET_BITS);
-
-				// Reuse current memory interface
-				// @TODO: optimize
-				for i in 0..(L1_CACHE_BLOCK_SIZE / 8) as u64 {
-					self.memory
-						.write_doubleword(_write_back_address + i * 8, _victim.get(i * 8, 8));
-				}
+				self.l1_write_back(_victim, index);
 			}
 			false => {}
 		}
@@ -285,6 +285,23 @@ impl Mmu {
 		println!("refill[{}][{}]: {:x?}", index, _way, _new_line.data_blocks);
 		self.l1_cache.data[index as usize].data[_way as usize] = _new_line;
 		Ok(_way as u64)
+	}
+
+	/// Flush
+	pub fn l1_flush(&mut self) {
+		for _index in 0..L1_CACHE_SET_NUMBER {
+			for _way in 0..L1_SET_ASSOCIATIVE_WAY {
+				if self.l1_cache.data[_index as usize].data[_way as usize].valid == true {
+					// reset valid
+					self.l1_cache.data[_index as usize].data[_way as usize].valid = false;
+					// write back
+					self.l1_write_back(
+						self.l1_cache.data[_index as usize].data[_way as usize],
+						_index as u64,
+					);
+				}
+			}
+		}
 	}
 
 	/// Fetches instruction 8 bytes(64bits). This method takes virtual address
@@ -356,12 +373,14 @@ impl Mmu {
 					let cache_line = match self.l1_cache.read_line(p_address) {
 						Ok(cache_line) => {
 							// hit
+							self.clock = self.clock.wrapping_add(L1_CACHE_CHECK_LATENCY as u64);
 							cache_line
 						}
 						Err(()) => {
 							// miss
 							// miss_handler guarantees to feed a line
-							self.miss_handler(p_address).unwrap()
+							self.clock = self.clock.wrapping_add(L1_CACHE_CHECK_LATENCY as u64);
+							self.l1_miss_handler(p_address).unwrap()
 						}
 					};
 
@@ -458,12 +477,14 @@ impl Mmu {
 					let _way = match self.l1_cache.read_line_info(p_address) {
 						Ok(_way) => {
 							// hit
+							self.clock = self.clock.wrapping_add(L1_CACHE_CHECK_LATENCY as u64);
 							_way
 						}
 						Err(()) => {
 							// miss
+							self.clock = self.clock.wrapping_add(L1_CACHE_CHECK_LATENCY as u64);
 							// miss_handler guarantees to feed a line
-							self.miss_handler_way(p_address).unwrap()
+							self.l1_miss_handler_way(p_address).unwrap()
 						}
 					};
 

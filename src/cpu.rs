@@ -278,7 +278,9 @@ impl Cpu {
 			Ok(()) => {}
 			Err(e) => self.handle_exception(e, instruction_address),
 		}
-		self.mmu.tick(&mut self.csr[CSR_MIP_ADDRESS as usize]);
+		self.clock = self
+			.clock
+			.wrapping_add(self.mmu.tick(&mut self.csr[CSR_MIP_ADDRESS as usize]));
 		self.handle_interrupt(self.pc);
 		// self.clock = self.clock.wrapping_add(1);
 
@@ -2493,8 +2495,9 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		data: 0x0000000f,
 		name: "FENCE",
 		cycles: 1,
-		operation: |_cpu, _word, _address| {
-			// Do nothing?
+		operation: |cpu, _word, _address| {
+			// Flush write back L1 cache
+			cpu.get_mut_mmu().l1_flush();
 			Ok(())
 		},
 		disassemble: dump_empty,
