@@ -3,6 +3,7 @@ const TEST_MEMORY_CAPACITY: u64 = 1024 * 512;
 const PROGRAM_MEMORY_CAPACITY: u64 = 1024 * 1024 * 128; // big enough to run Linux and xv6
 
 extern crate fnv;
+
 use self::fnv::FnvHashMap;
 use std::collections::HashMap;
 use std::str;
@@ -85,7 +86,13 @@ impl Emulator {
 				self.put_bytes_to_terminal(disas.as_bytes());
 				self.put_bytes_to_terminal(&[10]); // new line
 			}
-			let tohost_data_addr = self.cpu.get_mut_mmu().load_word_raw(self.tohost_addr);
+			let tohost_data_addr = match self.cpu.get_mut_mmu().load_word(self.tohost_addr) {
+				Ok(data) => data,
+				Err(e) => {
+					self.cpu.handle_exception(e, self.cpu.read_pc());
+					0
+				}
+			};
 			if tohost_data_addr != 0 {
 				match tohost_data_addr {
 					0..=0x80000000 => {
@@ -95,33 +102,72 @@ impl Emulator {
 						// let disas = self.cpu.disassemble_next_instruction();
 						// self.put_bytes_to_terminal(disas.as_bytes());
 						// self.put_bytes_to_terminal(&[10]); // new line
-						if self
+
+						// @TODO: optimize
+						let flag1 = match self
 							.cpu
 							.get_mut_mmu()
-							.load_word_raw((24 + tohost_data_addr).into())
-							!= 0 || self
-							.cpu
-							.get_mut_mmu()
-							.load_word_raw((28 + tohost_data_addr).into())
-							!= 0
+							.load_word((24 + tohost_data_addr) as u64)
 						{
-							let base = self
+							Ok(data) => data != 0,
+							_ => false,
+						};
+						let flag2 = match self
+							.cpu
+							.get_mut_mmu()
+							.load_word((28 + tohost_data_addr) as u64)
+						{
+							Ok(data) => data != 0,
+							_ => false,
+						};
+						if flag1 || flag2 {
+							let base = match self
 								.cpu
 								.get_mut_mmu()
-								.load_word_raw((4 * 4 + tohost_data_addr).into());
-							let length = self
+								.load_word((4 * 4 + tohost_data_addr) as u64)
+							{
+								Ok(data) => data,
+								Err(e) => {
+									self.cpu.handle_exception(e, self.cpu.read_pc());
+									0
+								}
+							};
+							let length = match self
 								.cpu
 								.get_mut_mmu()
-								.load_word_raw((6 * 4 + tohost_data_addr).into());
+								.load_word((6 * 4 + tohost_data_addr) as u64)
+							{
+								Ok(data) => data,
+								Err(e) => {
+									self.cpu.handle_exception(e, self.cpu.read_pc());
+									0
+								}
+							};
 							for i in 0..length {
-								let data = self.cpu.get_mut_mmu().load_raw((i + base).into());
+								let data = match self.cpu.get_mut_mmu().load((i + base) as u64) {
+									Ok(data) => data,
+									Err(e) => {
+										self.cpu.handle_exception(e, self.cpu.read_pc());
+										0
+									}
+								};
 								print!("{}", data as char);
 							}
 						}
-						self.cpu
+
+						// After printf, set 1 to fromhost and set 0 to tohost
+						match self
+							.cpu
 							.get_mut_mmu()
-							.store_word_raw(self.tohost_addr + 0x40, 1);
-						self.cpu.get_mut_mmu().store_word_raw(self.tohost_addr, 0);
+							.store_word(self.tohost_addr + 0x40, 1)
+						{
+							Ok(()) => {}
+							_ => panic!("Set fromhost Failed"),
+						};
+						match self.cpu.get_mut_mmu().store_word(self.tohost_addr, 0) {
+							Ok(()) => {}
+							_ => panic!("Reset tohost Failed"),
+						};
 					}
 				};
 			}
@@ -254,6 +300,7 @@ impl Emulator {
 		});
 
 		if self.tohost_addr != 0 {
+			// @TODO : modify this rule
 			self.is_test = true;
 			self.cpu.get_mut_mmu().init_memory(TEST_MEMORY_CAPACITY);
 		} else {
