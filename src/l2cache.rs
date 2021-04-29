@@ -1,46 +1,52 @@
 #[allow(unused)]
 use rand::random;
 
-/// 64B cache block size
-pub const L1_CACHE_BLOCK_SIZE: i32 = 64;
+use l1cache::{PlacementPolicy, L1_CACHE_SIZE};
 
-/// 32K L1 cache size
-pub const L1_CACHE_SIZE: i32 = 32768;
+/// 64B cache block size
+pub const L2_CACHE_BLOCK_SIZE: i32 = 64;
+
+/// 8*L1 L2 cache size
+pub const L2_CACHE_SIZE: i32 = 8 * L1_CACHE_SIZE;
 
 /// 8-way set-associative
-pub const L1_SET_ASSOCIATIVE_WAY: i32 = 8;
+pub const L2_SET_ASSOCIATIVE_WAY: i32 = 8;
 
 /// number of sets
-pub const L1_CACHE_SET_NUMBER: i32 = L1_CACHE_SIZE / (L1_CACHE_BLOCK_SIZE * L1_SET_ASSOCIATIVE_WAY);
+/// 1024 sets
+pub const L2_CACHE_SET_NUMBER: i32 = L2_CACHE_SIZE / (L2_CACHE_BLOCK_SIZE * L2_SET_ASSOCIATIVE_WAY);
 
-/// L1 cache line format
-pub const L1_CACHE_OFFSET_BITS: i32 = 6;
-pub const L1_CACHE_INDEX_BITS: i32 = 6;
-pub const L1_CACHE_TAG_BITS: i32 = 32 - L1_CACHE_OFFSET_BITS - L1_CACHE_INDEX_BITS;
+/// L2 cache line format
+pub const L2_CACHE_OFFSET_BITS: i32 = 6;
+pub const L2_CACHE_INDEX_BITS: i32 = 6;
+pub const L2_CACHE_TAG_BITS: i32 = 32 - L2_CACHE_OFFSET_BITS - L2_CACHE_INDEX_BITS;
 
 /// 64B cache block size
-pub const L1_CACHE_HIT_LATENCY: i32 = 1;
-pub const L1_CACHE_MISS_LATENCY: i32 = 100;
+pub const L2_CACHE_HIT_LATENCY: i32 = 4;
+pub const L2_CACHE_MISS_LATENCY: i32 = 100;
 
 #[derive(Copy, Clone)]
-pub struct L1CacheLine {
+pub struct L2CacheLine {
+	pub l1_inclusive: bool,
 	pub valid: bool,
 	pub tag: u64,
-	pub data_blocks: [u8; L1_CACHE_BLOCK_SIZE as usize],
+	pub data_blocks: [u8; L2_CACHE_BLOCK_SIZE as usize],
 }
-impl L1CacheLine {
-	pub fn new() -> L1CacheLine {
-		L1CacheLine {
+impl L2CacheLine {
+	pub fn new() -> L2CacheLine {
+		L2CacheLine {
+			l1_inclusive: false,
 			valid: false,
 			tag: 0 as u64,
-			data_blocks: [0 as u8; L1_CACHE_BLOCK_SIZE as usize],
+			data_blocks: [0 as u8; L2_CACHE_BLOCK_SIZE as usize],
 		}
 	}
-	pub const fn static_new() -> L1CacheLine {
-		L1CacheLine {
+	pub const fn static_new() -> L2CacheLine {
+		L2CacheLine {
+			l1_inclusive: false,
 			valid: false,
 			tag: 0 as u64,
-			data_blocks: [0 as u8; L1_CACHE_BLOCK_SIZE as usize],
+			data_blocks: [0 as u8; L2_CACHE_BLOCK_SIZE as usize],
 		}
 	}
 
@@ -65,51 +71,43 @@ impl L1CacheLine {
 }
 
 #[derive(Copy, Clone)]
-pub struct L1CacheSet {
-	pub data: [L1CacheLine; L1_SET_ASSOCIATIVE_WAY as usize],
+pub struct L2CacheSet {
+	pub data: [L2CacheLine; L2_SET_ASSOCIATIVE_WAY as usize],
 }
-impl L1CacheSet {
-	pub fn new() -> L1CacheSet {
-		L1CacheSet {
-			data: [L1CacheLine::new(); L1_SET_ASSOCIATIVE_WAY as usize],
+impl L2CacheSet {
+	pub fn new() -> L2CacheSet {
+		L2CacheSet {
+			data: [L2CacheLine::new(); L2_SET_ASSOCIATIVE_WAY as usize],
 		}
 	}
 
-	pub const fn static_new() -> L1CacheSet {
-		L1CacheSet {
-			data: [L1CacheLine::static_new(); L1_SET_ASSOCIATIVE_WAY as usize],
+	pub const fn static_new() -> L2CacheSet {
+		L2CacheSet {
+			data: [L2CacheLine::static_new(); L2_SET_ASSOCIATIVE_WAY as usize],
 		}
 	}
 }
 
 #[derive(Clone)]
-#[allow(dead_code)]
-pub enum PlacementPolicy {
-	Random,
-	LRU,
-	FIFO,
-}
-
-#[derive(Clone)]
-pub struct L1Cache {
+pub struct L2Cache {
 	pub data:
-		[L1CacheSet; (L1_CACHE_SIZE / (L1_CACHE_BLOCK_SIZE * L1_SET_ASSOCIATIVE_WAY)) as usize],
+		[L2CacheSet; (L2_CACHE_SIZE / (L2_CACHE_BLOCK_SIZE * L2_SET_ASSOCIATIVE_WAY)) as usize],
 	pub hit_num: u64,
 	pub miss_num: u64,
 }
 
-impl L1Cache {
-	pub fn new() -> L1Cache {
-		L1Cache {
-			data: [L1CacheSet::new(); L1_CACHE_SET_NUMBER as usize],
+impl L2Cache {
+	pub fn new() -> L2Cache {
+		L2Cache {
+			data: [L2CacheSet::new(); L2_CACHE_SET_NUMBER as usize],
 			hit_num: 0,
 			miss_num: 0,
 		}
 	}
 
-	pub const fn static_new() -> L1Cache {
-		L1Cache {
-			data: [L1CacheSet::static_new(); L1_CACHE_SET_NUMBER as usize],
+	pub const fn static_new() -> L2Cache {
+		L2Cache {
+			data: [L2CacheSet::static_new(); L2_CACHE_SET_NUMBER as usize],
 			hit_num: 0,
 			miss_num: 0,
 		}
@@ -120,12 +118,12 @@ impl L1Cache {
 	/// # Arguments
 	/// * `tag`: tag for line matching
 	/// * `index`: index for set selecting
-	fn read_line_raw(&self, tag: u64, index: u64) -> Result<L1CacheLine, ()> {
+	fn read_line_raw(&self, tag: u64, index: u64) -> Result<L2CacheLine, ()> {
 		// index the set
-		let mut _l1_cache_set = self.data[index as usize];
+		let mut _l2_cache_set = self.data[index as usize];
 		// traverse the set
-		for _way in 0..L1_SET_ASSOCIATIVE_WAY {
-			let _line = _l1_cache_set.data[_way as usize];
+		for _way in 0..L2_SET_ASSOCIATIVE_WAY {
+			let _line = _l2_cache_set.data[_way as usize];
 			if (_line.tag == tag) && (_line.valid == true) {
 				// hit
 				#[cfg(debug_assertions)]
@@ -144,10 +142,10 @@ impl L1Cache {
 	/// * `index`: index for set selecting
 	fn read_line_info_raw(&self, tag: u64, index: u64) -> Result<u64, ()> {
 		// index the set
-		let mut _l1_cache_set = self.data[index as usize];
+		let mut _l2_cache_set = self.data[index as usize];
 		// traverse the set
-		for _way in 0..L1_SET_ASSOCIATIVE_WAY {
-			let _line = _l1_cache_set.data[_way as usize];
+		for _way in 0..L2_SET_ASSOCIATIVE_WAY {
+			let _line = _l2_cache_set.data[_way as usize];
 			if (_line.tag == tag) && (_line.valid == true) {
 				// hit
 				#[cfg(debug_assertions)]
@@ -163,17 +161,17 @@ impl L1Cache {
 	///
 	/// # Arguments
 	/// * `p_address`: physical address
-	pub fn read_line(&mut self, p_address: u64) -> Result<L1CacheLine, ()> {
-		let tag: u64 = (p_address >> (L1_CACHE_OFFSET_BITS + L1_CACHE_INDEX_BITS))
-			& ((1 << L1_CACHE_TAG_BITS) - 1);
-		let index: u64 = (p_address >> L1_CACHE_OFFSET_BITS) & ((1 << L1_CACHE_INDEX_BITS) - 1);
+	pub fn read_line(&mut self, p_address: u64) -> Result<L2CacheLine, ()> {
+		let tag: u64 = (p_address >> (L2_CACHE_OFFSET_BITS + L2_CACHE_INDEX_BITS))
+			& ((1 << L2_CACHE_TAG_BITS) - 1);
+		let index: u64 = (p_address >> L2_CACHE_OFFSET_BITS) & ((1 << L2_CACHE_INDEX_BITS) - 1);
 		// println!(
 		// 	"{:x}({:b}): [{:b}|{:b}|{:b}]",
 		// 	p_address,
 		// 	p_address,
 		// 	tag,
 		// 	index,
-		// 	p_address & ((1 << L1_CACHE_OFFSET_BITS) - 1)
+		// 	p_address & ((1 << L2_CACHE_OFFSET_BITS) - 1)
 		// );
 
 		match self.read_line_raw(tag, index) {
@@ -197,9 +195,9 @@ impl L1Cache {
 	/// # Arguments
 	/// * `p_address`: physical address
 	pub fn read_line_info(&mut self, p_address: u64) -> Result<u64, ()> {
-		let tag: u64 = (p_address >> (L1_CACHE_OFFSET_BITS + L1_CACHE_INDEX_BITS))
-			& ((1 << L1_CACHE_TAG_BITS) - 1);
-		let index: u64 = (p_address >> L1_CACHE_OFFSET_BITS) & ((1 << L1_CACHE_INDEX_BITS) - 1);
+		let tag: u64 = (p_address >> (L2_CACHE_OFFSET_BITS + L2_CACHE_INDEX_BITS))
+			& ((1 << L2_CACHE_TAG_BITS) - 1);
+		let index: u64 = (p_address >> L2_CACHE_OFFSET_BITS) & ((1 << L2_CACHE_INDEX_BITS) - 1);
 
 		match self.read_line_info_raw(tag, index) {
 			// hit
@@ -224,7 +222,7 @@ impl L1Cache {
 	/// * `index`: index of cache set
 	pub fn allocate_new_line(&self, _index: u64, policy: PlacementPolicy) -> u8 {
 		match policy {
-			PlacementPolicy::Random => random::<u8>() % (L1_SET_ASSOCIATIVE_WAY as u8),
+			PlacementPolicy::Random => random::<u8>() % (L2_SET_ASSOCIATIVE_WAY as u8),
 			PlacementPolicy::LRU => {
 				// @TODO: LRU
 				0

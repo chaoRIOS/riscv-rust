@@ -3,6 +3,7 @@
 use fnv::FnvHashMap;
 use riscv_emu_rust::cpu::*;
 use riscv_emu_rust::l1cache::*;
+use riscv_emu_rust::l2cache::*;
 use riscv_emu_rust::memory::*;
 use riscv_emu_rust::mmu::*;
 use riscv_emu_rust::Emulator;
@@ -31,17 +32,8 @@ pub static mut EMULATOR: Emulator = Emulator {
 			memory: MemoryWrapper {
 				memory: Memory { data: vec![] },
 			},
-			l1_cache: L1Cache {
-				data: [L1CacheSet {
-					data: [L1CacheLine {
-						valid: false,
-						tag: 0 as u64,
-						data_blocks: [0 as u8; L1_CACHE_BLOCK_SIZE as usize],
-					}; L1_SET_ASSOCIATIVE_WAY as usize],
-				}; (L1_CACHE_SIZE / (L1_CACHE_BLOCK_SIZE * L1_SET_ASSOCIATIVE_WAY)) as usize],
-				hit_num: 0,
-				miss_num: 0,
-			},
+			l1_cache: L1Cache::static_new(),
+			l2_cache: L2Cache::static_new(),
 			mstatus: 0,
 		},
 		reservation: 0,

@@ -12,6 +12,7 @@ use std::str;
 pub mod cpu;
 pub mod elf_analyzer;
 pub mod l1cache;
+pub mod l2cache;
 pub mod memory;
 pub mod mmu;
 
