@@ -20,7 +20,7 @@ pub const L1_CACHE_TAG_BITS: i32 = 32 - L1_CACHE_OFFSET_BITS - L1_CACHE_INDEX_BI
 
 /// 64B cache block size
 pub const L1_CACHE_HIT_LATENCY: i32 = 1;
-pub const L1_CACHE_MISS_LATENCY: i32 = 100;
+pub const L1_CACHE_MISS_LATENCY: i32 = 1;
 
 #[derive(Copy, Clone)]
 pub struct L1CacheLine {

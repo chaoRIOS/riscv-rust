@@ -16,7 +16,10 @@ pub mod l2cache;
 pub mod memory;
 pub mod mmu;
 
-use cpu::{Cpu, Xlen, CSR_HPMCOUNTER3_ADDRESS, CSR_HPMCOUNTER4_ADDRESS, CSR_MCYCLE_ADDRESS};
+use cpu::{
+	Cpu, Xlen, CSR_HPMCOUNTER3_ADDRESS, CSR_HPMCOUNTER4_ADDRESS, CSR_HPMCOUNTER5_ADDRESS,
+	CSR_HPMCOUNTER6_ADDRESS, CSR_MCYCLE_ADDRESS,
+};
 use elf_analyzer::ElfAnalyzer;
 use l1cache::L1_CACHE_HIT_LATENCY;
 
@@ -158,17 +161,36 @@ impl Emulator {
 			"Latency = {} cycles",
 			self.get_cpu().read_csr_raw(CSR_MCYCLE_ADDRESS)
 		);
-		let hit_num = self.get_cpu().read_csr_raw(CSR_HPMCOUNTER3_ADDRESS);
-		let miss_num = self.get_cpu().read_csr_raw(CSR_HPMCOUNTER4_ADDRESS);
+
+		#[cfg(debug_assertions)]
+		{
+			// L1 Cache hit/miss
+			let l1_hit_num = self.get_cpu().read_csr_raw(CSR_HPMCOUNTER3_ADDRESS);
+			let l1_miss_num = self.get_cpu().read_csr_raw(CSR_HPMCOUNTER4_ADDRESS);
+
+			println!(
+				"Cache Hit rate = {}%",
+				((l1_hit_num * 100) as f32 / (l1_hit_num + l1_miss_num) as f32) as f32
+			);
+			println!(
+				"Cache Miss rate = {}%",
+				((l1_miss_num * 100) as f32 / (l1_hit_num + l1_miss_num) as f32) as f32
+			);
+		}
+
+		// L2 Cache hit/miss
+		let l2_hit_num = self.get_cpu().read_csr_raw(CSR_HPMCOUNTER5_ADDRESS);
+		let l2_miss_num = self.get_cpu().read_csr_raw(CSR_HPMCOUNTER6_ADDRESS);
 
 		println!(
 			"Cache Hit rate = {}%",
-			((hit_num * 100) as f32 / (hit_num + miss_num) as f32) as f32
+			((l2_hit_num * 100) as f32 / (l2_hit_num + l2_miss_num) as f32) as f32
 		);
 		println!(
 			"Cache Miss rate = {}%",
-			((miss_num * 100) as f32 / (hit_num + miss_num) as f32) as f32
+			((l2_miss_num * 100) as f32 / (l2_hit_num + l2_miss_num) as f32) as f32
 		);
+
 		println!("Cache Hit Latency = {} cycles", L1_CACHE_HIT_LATENCY);
 	}
 

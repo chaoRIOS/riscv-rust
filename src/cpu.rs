@@ -47,6 +47,8 @@ const _CSR_INSERT_ADDRESS: u16 = 0xc02;
 
 pub const CSR_HPMCOUNTER3_ADDRESS: u16 = 0xc03;
 pub const CSR_HPMCOUNTER4_ADDRESS: u16 = 0xc04;
+pub const CSR_HPMCOUNTER5_ADDRESS: u16 = 0xc05;
+pub const CSR_HPMCOUNTER6_ADDRESS: u16 = 0xc06;
 
 const _CSR_MHARTID_ADDRESS: u16 = 0xf14;
 
@@ -295,6 +297,8 @@ impl Cpu {
 		self.write_csr_raw(CSR_MCYCLE_ADDRESS, self.clock);
 		self.write_csr_raw(CSR_HPMCOUNTER3_ADDRESS, self.mmu.l1_cache.hit_num);
 		self.write_csr_raw(CSR_HPMCOUNTER4_ADDRESS, self.mmu.l1_cache.miss_num);
+		self.write_csr_raw(CSR_HPMCOUNTER5_ADDRESS, self.mmu.l2_cache.hit_num);
+		self.write_csr_raw(CSR_HPMCOUNTER6_ADDRESS, self.mmu.l2_cache.miss_num);
 	}
 
 	// @TODO: Rename?
@@ -2504,6 +2508,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		operation: |cpu, _word, _address| {
 			// Flush write back L1 cache
 			cpu.get_mut_mmu().l1_flush();
+			cpu.get_mut_mmu().l2_flush();
 			Ok(())
 		},
 		disassemble: dump_empty,
