@@ -5,6 +5,8 @@ pub const DRAM_BASE: u64 = 0x80000000;
 extern crate fnv;
 
 use cpu::{get_privilege_mode, PrivilegeMode, Trap, TrapType, Xlen};
+use l1cache::*;
+use l2cache::*;
 use memory::Memory;
 
 /// Emulates Memory Management Unit. It holds the Main memory and peripheral
@@ -22,6 +24,8 @@ pub struct Mmu {
 	pub addressing_mode: AddressingMode,
 	pub privilege_mode: PrivilegeMode,
 	pub memory: MemoryWrapper,
+	pub l1_cache: L1Cache,
+	pub l2_cache: L2Cache,
 
 	/// Address translation can be affected `mstatus` (MPRV, MPP in machine mode)
 	/// then `Mmu` has copy of it.
@@ -67,6 +71,8 @@ impl Mmu {
 			addressing_mode: AddressingMode::None,
 			privilege_mode: PrivilegeMode::Machine,
 			memory: MemoryWrapper::new(),
+			l1_cache: L1Cache::new(),
+			l2_cache: L2Cache::new(),
 			mstatus: 0,
 			tlb_tag:[0;TLB_ENTRY_NUM],
 			tlb_value:[0;TLB_ENTRY_NUM],
@@ -91,8 +97,10 @@ impl Mmu {
 	}
 
 	/// Runs one cycle of MMU and peripheral devices.
-	pub fn tick(&mut self, _mip: &mut u64) {
-		self.clock = self.clock.wrapping_add(1);
+	pub fn tick(&mut self, _mip: &mut u64) -> u64 {
+		let mmu_latency = self.clock;
+		self.clock = 0;
+		mmu_latency as u64
 	}
 
 	/// Updates addressing mode
@@ -152,39 +160,6 @@ impl Mmu {
 		}
 	}
 
-	/// Fetches instruction four bytes. This method takes virtual address
-	/// and translates into physical address inside.
-	///
-	/// # Arguments
-	/// * `v_address` Virtual address
-	pub fn fetch_word(&mut self, v_address: u64) -> Result<u32, Trap> {
-		let width = 4;
-		match (v_address & 0xfff) <= (0x1000 - width) {
-			true => {
-				// Fast path. All bytes fetched are in the same page so
-				// translating an address only once.
-				let effective_address = self.get_effective_address(v_address);
-				match self.translate_address(effective_address, &MemoryAccessType::Execute) {
-					Ok(p_address) => Ok(self.load_word_raw(p_address)),
-					Err(()) => Err(Trap {
-						trap_type: TrapType::InstructionPageFault,
-						value: effective_address,
-					}),
-				}
-			}
-			false => {
-				let mut data = 0 as u32;
-				for i in 0..width {
-					match self.fetch(v_address.wrapping_add(i)) {
-						Ok(byte) => data |= (byte as u32) << (i * 8),
-						Err(e) => return Err(e),
-					};
-				}
-				Ok(data)
-			}
-		}
-	}
-
 	/// Fetches instruction 8 bytes(64bits). This method takes virtual address
 	/// and translates into physical address inside.
 	///
@@ -234,19 +209,194 @@ impl Mmu {
 		}
 	}
 
-	/// Loads an byte. This method takes virtual address and translates
-	/// into physical address inside.
+	/// Fetches instruction four bytes. This method takes virtual address
+	/// and translates into physical address inside.
+	///
+	/// @TODO: Seperate I$
 	///
 	/// # Arguments
 	/// * `v_address` Virtual address
-	pub fn load(&mut self, v_address: u64) -> Result<u8, Trap> {
-		let effective_address = self.get_effective_address(v_address);
-		match self.translate_address(effective_address, &MemoryAccessType::Read) {
-			Ok(p_address) => Ok(self.load_raw(p_address)),
-			Err(()) => Err(Trap {
-				trap_type: TrapType::LoadPageFault,
-				value: v_address,
-			}),
+	pub fn fetch_word(&mut self, v_address: u64) -> Result<u32, Trap> {
+		let width = 4;
+		match (v_address & 0xfff) <= (0x1000 - width) {
+			true => {
+				// Fast path. All bytes fetched are in the same page so
+				// translating an address only once.
+				let effective_address = self.get_effective_address(v_address);
+				match self.translate_address(effective_address, &MemoryAccessType::Execute) {
+					Ok(p_address) => Ok(self.load_word_raw(p_address)),
+					Err(()) => Err(Trap {
+						trap_type: TrapType::InstructionPageFault,
+						value: effective_address,
+					}),
+				}
+			}
+			false => {
+				let mut data = 0 as u32;
+				for i in 0..width {
+					match self.fetch(v_address.wrapping_add(i)) {
+						Ok(byte) => data |= (byte as u32) << (i * 8),
+						Err(e) => return Err(e),
+					};
+				}
+				Ok(data)
+			}
+		}
+	}
+
+	/// Write back method for L1 cache
+	///
+	/// # Arguments
+	/// * `victim_cache_line`: the line needs to be written back
+	/// * `index`: index of the line
+	fn l1_write_back(&mut self, victim_cache_line: L1CacheLine, index: u64) {
+		let mut _write_back_address = 0 as u64;
+		// [ tag | index | 000000 ]
+		_write_back_address = _write_back_address
+			| (victim_cache_line.tag << (L1_CACHE_INDEX_BITS + L1_CACHE_OFFSET_BITS))
+			| (index << L1_CACHE_OFFSET_BITS);
+
+		// Reuse current memory interface
+		// @TODO: optimize
+		for i in 0..(L1_CACHE_BLOCK_SIZE / 8) as u64 {
+			self.memory
+				.write_doubleword(_write_back_address + i * 8, victim_cache_line.get(i * 8, 8));
+		}
+	}
+
+	/// Allocate a new L1 entry
+	/// with returning the allocated way index
+	///
+	/// # Arguments
+	/// * `index`: physical address
+	fn l1_miss_handler_way(&mut self, index: u64) -> Result<u64, ()> {
+		// let index: u64 = (index >> L1_CACHE_OFFSET_BITS) & ((1 << L1_CACHE_INDEX_BITS) - 1);
+		let way = self
+			.l1_cache
+			.allocate_new_line(index, PlacementPolicy::Random);
+		let victim = self.l1_cache.data[index as usize].data[way as usize];
+
+		// Detect victim cache line
+		// write back the victim
+		match victim.valid {
+			true => {
+				self.l1_write_back(victim, index);
+			}
+			false => {}
+		}
+
+		Ok(way as u64)
+	}
+
+	/// Refill a line to L1 cache after allocation and writing back
+	/// Modified downward interface of L1
+	///
+	/// # Arguments
+	/// * `index`: pre-parsed index for the p_address
+	/// * `way`: allocated way in L1 cache
+	/// * `cache_line` : target cache line
+	pub fn l1_refill(&mut self, index: u64, way: u64, cache_line: L1CacheLine) -> Result<(), ()> {
+		// Place the line
+		#[cfg(debug_assertions)]
+		println!("refill[{}][{}]: {:x?}", index, way, cache_line.data_blocks);
+		self.l1_cache.data[index as usize].data[way as usize] = cache_line;
+		self.l1_cache.data[index as usize].data[way as usize].valid = true;
+		Ok(())
+	}
+
+	/// Flush L1 cache
+	/// (e.g. FENCE)
+	pub fn l1_flush(&mut self) {
+		for index in 0..L1_CACHE_SET_NUMBER {
+			for way in 0..L1_SET_ASSOCIATIVE_WAY {
+				if self.l1_cache.data[index as usize].data[way as usize].valid == true {
+					// invalid
+					self.l1_cache.data[index as usize].data[way as usize].valid = false;
+					// write back
+					self.l1_write_back(
+						self.l1_cache.data[index as usize].data[way as usize],
+						index as u64,
+					);
+				}
+			}
+		}
+	}
+
+	/// Write back method for L2 cache
+	///
+	/// # Arguments
+	/// * `victim_cache_line`: the line needs to be written back
+	/// * `index`: index of the line
+	fn l2_write_back(&mut self, victim_cache_line: L2CacheLine, index: u64) {
+		let mut _write_back_address = 0 as u64;
+		// [ tag | index | 000000 ]
+		_write_back_address = _write_back_address
+			| (victim_cache_line.tag << (L2_CACHE_INDEX_BITS + L2_CACHE_OFFSET_BITS))
+			| (index << L2_CACHE_OFFSET_BITS);
+
+		// Reuse current memory interface
+		// @TODO: optimize
+		for i in 0..(L2_CACHE_BLOCK_SIZE / 8) as u64 {
+			self.memory
+				.write_doubleword(_write_back_address + i * 8, victim_cache_line.get(i * 8, 8));
+		}
+	}
+
+	/// Allocate a new L2 entry
+	/// with returning the allocated way index
+	///
+	/// # Arguments
+	/// * `index`: physical address
+	fn l2_miss_handler_way(&mut self, index: u64) -> Result<u64, ()> {
+		// let index: u64 = (index >> L2_CACHE_OFFSET_BITS) & ((1 << L2_CACHE_INDEX_BITS) - 1);
+		let way = self
+			.l2_cache
+			.allocate_new_line(index, PlacementPolicy::Random);
+		let victim = self.l2_cache.data[index as usize].data[way as usize];
+
+		// Detect victim cache line
+		// write back the victim
+		match victim.valid {
+			true => {
+				self.l2_write_back(victim, index);
+			}
+			false => {}
+		}
+
+		Ok(way as u64)
+	}
+
+	/// Refill a line to L2 cache after allocation and writing back
+	/// Modified downward interface of L2
+	///
+	/// # Arguments
+	/// * `index`: pre-parsed index for the p_address
+	/// * `way`: allocated way in L2 cache
+	/// * `cache_line` : target cache line
+	pub fn l2_refill(&mut self, index: u64, way: u64, cache_line: L2CacheLine) -> Result<(), ()> {
+		// Place the line
+		#[cfg(debug_assertions)]
+		println!("refill[{}][{}]: {:x?}", index, way, cache_line.data_blocks);
+		self.l2_cache.data[index as usize].data[way as usize] = cache_line;
+		self.l2_cache.data[index as usize].data[way as usize].valid = true;
+		Ok(())
+	}
+
+	/// Flush L2 cache
+	/// (e.g. FENCE)
+	pub fn l2_flush(&mut self) {
+		for index in 0..L2_CACHE_SET_NUMBER {
+			for way in 0..L2_SET_ASSOCIATIVE_WAY {
+				if self.l2_cache.data[index as usize].data[way as usize].valid == true {
+					// invalid
+					self.l2_cache.data[index as usize].data[way as usize].valid = false;
+					// write back
+					self.l2_write_back(
+						self.l2_cache.data[index as usize].data[way as usize],
+						index as u64,
+					);
+				}
+			}
 		}
 	}
 
@@ -265,19 +415,65 @@ impl Mmu {
 		match (v_address & 0xfff) <= (0x1000 - width) {
 			true => match self.translate_address(v_address, &MemoryAccessType::Read) {
 				Ok(p_address) => {
-					// Fast path. All bytes fetched are in the same page so
-					// translating an address only once.
-					let p_address = match p_address > 0xffffffff00000000 {
-						true => p_address & 0x00000000ffffffff,
-						false => p_address,
+					#[cfg(debug_assertions)]
+					println!("\nload {} @ 0x{:x}", width, p_address);
+					let cache_line = match self.l1_cache.read_line(p_address) {
+						Ok(cache_line) => {
+							// hit
+							self.clock = self.clock.wrapping_add(L1_CACHE_HIT_LATENCY as u64);
+							self.l1_cache.hit_num += 1;
+							cache_line
+						}
+						Err(()) => {
+							// miss
+
+							// performance counter
+							self.clock = self.clock.wrapping_add(L1_CACHE_HIT_LATENCY as u64);
+							self.l1_cache.miss_num += 1;
+
+							// pre-parse index
+							let l1_index: u64 = (p_address >> L1_CACHE_OFFSET_BITS)
+								& ((1 << L1_CACHE_INDEX_BITS) - 1);
+
+							// miss_handler guarantees to feed a line
+							let l1_way_allocated = self.l1_miss_handler_way(l1_index).unwrap();
+
+							// aquire the new line
+							// Access memory
+
+							// @TODO : optimize
+							// Align cache line
+							let p_address_aligned =
+								(p_address >> L1_CACHE_OFFSET_BITS) << L1_CACHE_OFFSET_BITS;
+							#[cfg(debug_assertions)]
+							println!("refill from {:x}", p_address_aligned);
+
+							// Fetch new cache line
+							let mut l1_line_new = L1CacheLine::new();
+							l1_line_new.valid = true;
+							l1_line_new.tag =
+								p_address_aligned >> (L1_CACHE_INDEX_BITS + L1_CACHE_OFFSET_BITS);
+							for i in 0..L1_CACHE_BLOCK_SIZE {
+								l1_line_new.data_blocks[i as usize] =
+									self.load_raw(p_address_aligned + i as u64);
+							}
+
+							// refill the new line
+							match self.l1_refill(l1_index, l1_way_allocated, l1_line_new) {
+								Ok(()) => l1_line_new,
+								Err(()) => {
+									// @TODO: determine TrapType
+									return Err(Trap {
+										trap_type: TrapType::LoadAccessFault,
+										value: p_address,
+									});
+								}
+							}
+						}
 					};
-					match width {
-						1 => Ok(self.load_raw(p_address) as u64),
-						2 => Ok(self.load_halfword_raw(p_address) as u64),
-						4 => Ok(self.load_word_raw(p_address) as u64),
-						8 => Ok(self.load_doubleword_raw(p_address)),
-						_ => panic!("Width must be 1, 2, 4, or 8. {:X}", width),
-					}
+
+					let offset = p_address & ((1 << L1_CACHE_OFFSET_BITS) - 1);
+					Ok(cache_line.get(offset, width))
 				}
 				Err(()) => Err(Trap {
 					trap_type: TrapType::LoadPageFault,
@@ -294,6 +490,18 @@ impl Mmu {
 				}
 				Ok(data)
 			}
+		}
+	}
+
+	/// Loads an byte. This method takes virtual address and translates
+	/// into physical address inside.
+	///
+	/// # Arguments
+	/// * `v_address` Virtual address
+	pub fn load(&mut self, v_address: u64) -> Result<u8, Trap> {
+		match self.load_bytes(v_address, 1) {
+			Ok(data) => Ok(data as u8),
+			Err(e) => Err(e),
 		}
 	}
 
@@ -333,25 +541,6 @@ impl Mmu {
 		}
 	}
 
-	/// Store an byte. This method takes virtual address and translates
-	/// into physical address inside.
-	///
-	/// # Arguments
-	/// * `v_address` Virtual address
-	/// * `value`
-	pub fn store(&mut self, v_address: u64, value: u8) -> Result<(), Trap> {
-		match self.translate_address(v_address, &MemoryAccessType::Write) {
-			Ok(p_address) => {
-				self.store_raw(p_address, value);
-				Ok(())
-			}
-			Err(()) => Err(Trap {
-				trap_type: TrapType::StorePageFault,
-				value: v_address,
-			}),
-		}
-	}
-
 	/// Stores multiple bytes. This method takes virtual address and translates
 	/// into physical address inside.
 	///
@@ -368,19 +557,70 @@ impl Mmu {
 		match (v_address & 0xfff) <= (0x1000 - width) {
 			true => match self.translate_address(v_address, &MemoryAccessType::Write) {
 				Ok(p_address) => {
-					// Fast path. All bytes fetched are in the same page so
-					// translating an address only once.
-					let p_address = match p_address > 0xffffffff00000000 {
-						true => p_address & 0x00000000ffffffff,
-						false => p_address,
+					// Store to cache
+					// @TODO: store buffer
+					// Get allocated cache line's way index
+					#[cfg(debug_assertions)]
+					println!("\nstore {} @ 0x{:x}", width, p_address);
+					let _way = match self.l1_cache.read_line_info(p_address) {
+						Ok(_way) => {
+							// hit
+							self.clock = self.clock.wrapping_add(L1_CACHE_HIT_LATENCY as u64);
+							self.l1_cache.hit_num += 1;
+							_way
+						}
+						Err(()) => {
+							// miss
+							self.clock = self.clock.wrapping_add(L1_CACHE_HIT_LATENCY as u64);
+							self.l1_cache.miss_num += 1;
+
+							let l1_index: u64 = (p_address >> L1_CACHE_OFFSET_BITS)
+								& ((1 << L1_CACHE_INDEX_BITS) - 1);
+
+							let l1_way_allocated = self.l1_miss_handler_way(l1_index).unwrap();
+
+							// aquire the new line
+							// Access memory
+
+							// @TODO : optimize
+							// Align cache line
+							let p_address_aligned =
+								(p_address >> L1_CACHE_OFFSET_BITS) << L1_CACHE_OFFSET_BITS;
+							#[cfg(debug_assertions)]
+							println!("refill from {:x}", p_address_aligned);
+
+							// Fetch new cache line
+							let mut l1_line_new = L1CacheLine::new();
+							l1_line_new.valid = true;
+							l1_line_new.tag =
+								p_address_aligned >> (L1_CACHE_INDEX_BITS + L1_CACHE_OFFSET_BITS);
+							for i in 0..L1_CACHE_BLOCK_SIZE {
+								l1_line_new.data_blocks[i as usize] =
+									self.load_raw(p_address_aligned + i as u64);
+							}
+
+							// refill the new line
+							match self.l1_refill(l1_index, l1_way_allocated, l1_line_new) {
+								Ok(()) => l1_way_allocated,
+								Err(()) => {
+									// @TODO: determine TrapType
+									return Err(Trap {
+										trap_type: TrapType::LoadAccessFault,
+										value: p_address,
+									});
+								}
+							}
+						}
 					};
-					match width {
-						1 => self.store_raw(p_address, value as u8),
-						2 => self.store_halfword_raw(p_address, value as u16),
-						4 => self.store_word_raw(p_address, value as u32),
-						8 => self.store_doubleword_raw(p_address, value),
-						_ => panic!("Width must be 1, 2, 4, or 8. {:X}", width),
-					}
+
+					let index: u64 =
+						(p_address >> L1_CACHE_OFFSET_BITS) & ((1 << L1_CACHE_INDEX_BITS) - 1);
+					let offset = p_address & ((1 << L1_CACHE_OFFSET_BITS) - 1);
+
+					// Update cache line
+					self.l1_cache.data[index as usize].data[_way as usize]
+						.set(offset, width, value);
+
 					Ok(())
 				}
 				Err(()) => Err(Trap {
@@ -398,6 +638,16 @@ impl Mmu {
 				Ok(())
 			}
 		}
+	}
+
+	/// Store an byte. This method takes virtual address and translates
+	/// into physical address inside.
+	///
+	/// # Arguments
+	/// * `v_address` Virtual address
+	/// * `value`
+	pub fn store(&mut self, v_address: u64, value: u8) -> Result<(), Trap> {
+		self.store_bytes(v_address, value as u64, 1)
 	}
 
 	/// Stores two bytes. This method takes virtual address and translates
@@ -523,7 +773,7 @@ impl Mmu {
 	/// # Arguments
 	/// * `p_address` Physical address
 	/// * `value` data written
-	fn store_halfword_raw(&mut self, p_address: u64, value: u16) {
+	fn _store_halfword_raw(&mut self, p_address: u64, value: u16) {
 		let effective_address = self.get_effective_address(p_address);
 		match effective_address >= DRAM_BASE
 			&& effective_address.wrapping_add(1) > effective_address

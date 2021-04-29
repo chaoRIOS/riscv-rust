@@ -40,10 +40,14 @@ const CSR_MTVAL_ADDRESS: u16 = 0x343;
 const CSR_MIP_ADDRESS: u16 = 0x344;
 const _CSR_PMPCFG0_ADDRESS: u16 = 0x3a0;
 const _CSR_PMPADDR0_ADDRESS: u16 = 0x3b0;
-const _CSR_MCYCLE_ADDRESS: u16 = 0xb00;
+pub const CSR_MCYCLE_ADDRESS: u16 = 0xb00;
 const _CSR_CYCLE_ADDRESS: u16 = 0xc00;
 const CSR_TIME_ADDRESS: u16 = 0xc01;
 const _CSR_INSERT_ADDRESS: u16 = 0xc02;
+
+pub const CSR_HPMCOUNTER3_ADDRESS: u16 = 0xc03;
+pub const CSR_HPMCOUNTER4_ADDRESS: u16 = 0xc04;
+
 const _CSR_MHARTID_ADDRESS: u16 = 0xf14;
 
 const MIP_MEIP: u64 = 0x800;
@@ -278,7 +282,9 @@ impl Cpu {
 			Ok(()) => {}
 			Err(e) => self.handle_exception(e, instruction_address),
 		}
-		self.mmu.tick(&mut self.csr[CSR_MIP_ADDRESS as usize]);
+		self.clock = self
+			.clock
+			.wrapping_add(self.mmu.tick(&mut self.csr[CSR_MIP_ADDRESS as usize]));
 		self.handle_interrupt(self.pc);
 		// self.clock = self.clock.wrapping_add(1);
 
@@ -286,7 +292,9 @@ impl Cpu {
 		// just an arbiraty ratio.
 		// @TODO: Implement more properly
 		// self.write_csr_raw(CSR_CYCLE_ADDRESS, self.clock * 8);
-		self.write_csr_raw(_CSR_MCYCLE_ADDRESS, self.clock);
+		self.write_csr_raw(CSR_MCYCLE_ADDRESS, self.clock);
+		self.write_csr_raw(CSR_HPMCOUNTER3_ADDRESS, self.mmu.l1_cache.hit_num);
+		self.write_csr_raw(CSR_HPMCOUNTER4_ADDRESS, self.mmu.l1_cache.miss_num);
 	}
 
 	// @TODO: Rename?
@@ -2493,8 +2501,9 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		data: 0x0000000f,
 		name: "FENCE",
 		cycles: 1,
-		operation: |_cpu, _word, _address| {
-			// Do nothing?
+		operation: |cpu, _word, _address| {
+			// Flush write back L1 cache
+			cpu.get_mut_mmu().l1_flush();
 			Ok(())
 		},
 		disassemble: dump_empty,

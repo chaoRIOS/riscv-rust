@@ -2,6 +2,8 @@
 // use crate::utils::*;
 use fnv::FnvHashMap;
 use riscv_emu_rust::cpu::*;
+use riscv_emu_rust::l1cache::*;
+use riscv_emu_rust::l2cache::*;
 use riscv_emu_rust::memory::*;
 use riscv_emu_rust::mmu::*;
 use riscv_emu_rust::Emulator;
@@ -30,6 +32,8 @@ pub static mut EMULATOR: Emulator = Emulator {
 			memory: MemoryWrapper {
 				memory: Memory { data: vec![] },
 			},
+			l1_cache: L1Cache::static_new(),
+			l2_cache: L2Cache::static_new(),
 			mstatus: 0,
 		},
 		reservation: 0,

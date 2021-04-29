@@ -1,28 +1,59 @@
-use std::os::raw::c_int;
+#![allow(unused)]
 
-#[link(name = "dramsim_interface")]
-extern "C" {
-	pub fn dramsim_test() -> c_int;
-}
+extern crate getopts;
+extern crate riscv_emu_rust;
 
-fn main() {
+extern crate lab1;
+
+use riscv_emu_rust::cpu::Xlen;
+
+use getopts::Options;
+use std::env;
+use std::fs::File;
+use std::io::Read;
+
+use lab1::pkg::*;
+
+fn run_elf(file_path: &str) -> std::io::Result<()> {
+	let mut elf_file = File::open(file_path)?;
+	// let mut elf_file = File::open("../resources/lab1/add.out")?;
+	let mut elf_contents = vec![];
+	elf_file.read_to_end(&mut elf_contents)?;
 	unsafe {
-		assert_eq!(0, dramsim_test() as i64);
+		EMULATOR.setup_program(elf_contents);
+		EMULATOR.update_xlen(Xlen::Bit64);
+
+		EMULATOR.run_program();
 	}
+	Ok(())
 }
 
-#[cfg(test)]
-mod test {
-	use std::os::raw::c_int;
-
-	#[link(name = "cfoo")]
-	extern "C" {
-		pub fn add(a: c_int) -> c_int;
-	}
-	#[test]
-	fn cadd() {
-		unsafe {
-			assert_eq!(1234, add(234 as c_int) as i64);
+fn main() -> std::io::Result<()> {
+	let args: Vec<String> = env::args().collect();
+	let mut opts = Options::new();
+	opts.optflagopt("i", "input", "Set input ELF file", "ELF_PATH");
+	opts.optflag("t", "trace", "Enable memory access tracing");
+	opts.optflag("h", "help", "Show this help menu");
+	// run_elf(args[1].clone())?;
+	match opts.parse(&args[1..]) {
+		Ok(_args) => {
+			match _args.opt_str("i") {
+				Some(path) => {
+					if _args.opt_present("t") {
+						// @TODO: generate trace
+					}
+					run_elf(path.as_str())?
+				}
+				_ => {
+					println!("{}", opts.usage(&format!("{} [options]", args[0])));
+					return Ok(());
+				}
+			}
 		}
-	}
+		Err(f) => {
+			println!("{}", opts.usage(&format!("{} [options]", args[0])));
+			return Ok(());
+		}
+	};
+	Ok(())
 }

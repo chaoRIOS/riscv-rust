@@ -6,3 +6,4 @@
 *csv
 lab2/csrc/*.so
 lab2/*.log
+.vscode*

@@ -1,19 +1,24 @@
 // @TODO: temporal
-const TEST_MEMORY_CAPACITY: u64 = 1024 * 512;
+const TEST_MEMORY_CAPACITY: u64 = 1024 * 1024 * 512;
 const PROGRAM_MEMORY_CAPACITY: u64 = 1024 * 1024 * 128; // big enough to run Linux and xv6
 
 extern crate fnv;
+extern crate rand;
+
 use self::fnv::FnvHashMap;
 use std::collections::HashMap;
 use std::str;
 
 pub mod cpu;
 pub mod elf_analyzer;
+pub mod l1cache;
+pub mod l2cache;
 pub mod memory;
 pub mod mmu;
 
-use cpu::{Cpu, Xlen};
+use cpu::{Cpu, Xlen, CSR_HPMCOUNTER3_ADDRESS, CSR_HPMCOUNTER4_ADDRESS, CSR_MCYCLE_ADDRESS};
 use elf_analyzer::ElfAnalyzer;
+use l1cache::L1_CACHE_HIT_LATENCY;
 
 /// RISC-V emulator. It emulates RISC-V CPU and peripheral devices.
 ///
@@ -78,60 +83,93 @@ impl Emulator {
 	/// Runs program set by `setup_program()`. The emulator won't stop forever.
 	/// * Added our print function.
 	pub fn run_program(&mut self) {
-		// let fromhost_addr = 0x80001040;
-		// let fromhost_addr = 0x80001ea0;
-		// let fromhost_addr = 0x800011a0;
 		loop {
-			// let disas = self.cpu.disassemble_next_instruction();
-			// self.put_bytes_to_terminal(disas.as_bytes());
-			// self.put_bytes_to_terminal(&[10]); // new line
-			let tohost_data_addr = self.cpu.get_mut_mmu().load_word_raw(self.tohost_addr);
+			#[cfg(debug_assertions)]
+			{
+				let disas = self.cpu.disassemble_next_instruction();
+				self.put_bytes_to_terminal(disas.as_bytes());
+				self.put_bytes_to_terminal(&[10]); // new line
+			}
+
+			let tohost_data_addr = match self.cpu.get_mut_mmu().load_word(self.tohost_addr) {
+				Ok(data) => {
+					self.cpu.clock = self.cpu.clock.wrapping_sub(1);
+					data
+				}
+				Err(e) => {
+					self.cpu.handle_exception(e, self.cpu.read_pc());
+					0
+				}
+			};
+			// use raw interfaces to reserve clock cycles
 			if tohost_data_addr != 0 {
 				match tohost_data_addr {
 					0..=0x80000000 => {
-						println!("{:x}", tohost_data_addr);
 						break;
 					}
 					_ => {
-						// let disas = self.cpu.disassemble_next_instruction();
-						// self.put_bytes_to_terminal(disas.as_bytes());
-						// self.put_bytes_to_terminal(&[10]); // new line
-						if self
+						// @TODO: optimize
+						let flag1 = self
 							.cpu
 							.get_mut_mmu()
-							.load_word_raw((24 + tohost_data_addr).into())
-							!= 0 || self
+							.load_word_raw((24 + tohost_data_addr) as u64)
+							!= 0;
+						let flag2 = self
 							.cpu
 							.get_mut_mmu()
-							.load_word_raw((28 + tohost_data_addr).into())
-							!= 0
-						{
+							.load_word_raw((28 + tohost_data_addr) as u64)
+							!= 0;
+						if flag1 || flag2 {
 							let base = self
 								.cpu
 								.get_mut_mmu()
-								.load_word_raw((4 * 4 + tohost_data_addr).into());
+								.load_word_raw((4 * 4 + tohost_data_addr) as u64);
 							let length = self
 								.cpu
 								.get_mut_mmu()
-								.load_word_raw((6 * 4 + tohost_data_addr).into());
+								.load_word_raw((6 * 4 + tohost_data_addr) as u64);
 							for i in 0..length {
-								let data = self.cpu.get_mut_mmu().load_raw((i + base).into());
+								let data = self.cpu.get_mut_mmu().load_raw((i + base) as u64);
 								print!("{}", data as char);
 							}
 						}
-						self.cpu
+
+						// After printf, set 1 to fromhost and set 0 to tohost
+						// Note: host needs to access cache instead of memory!
+						match self
+							.cpu
 							.get_mut_mmu()
-							.store_word_raw(self.tohost_addr + 8, 1);
-						self.cpu.get_mut_mmu().store_word_raw(self.tohost_addr, 0);
+							.store_word(self.tohost_addr + 0x40, 1)
+						{
+							Ok(()) => {}
+							_ => panic!("Set fromhost Failed"),
+						};
+						match self.cpu.get_mut_mmu().store_word(self.tohost_addr, 0) {
+							Ok(()) => {}
+							_ => panic!("Reset tohost Failed"),
+						};
 					}
 				};
 			}
 			self.tick();
 		}
 
-		let _csr_mcycle_address: u16 = 0xb00;
-		let _latency = self.get_cpu().read_csr_raw(_csr_mcycle_address);
-		println!("Latency = {} cycles", _latency);
+		println!(
+			"Latency = {} cycles",
+			self.get_cpu().read_csr_raw(CSR_MCYCLE_ADDRESS)
+		);
+		let hit_num = self.get_cpu().read_csr_raw(CSR_HPMCOUNTER3_ADDRESS);
+		let miss_num = self.get_cpu().read_csr_raw(CSR_HPMCOUNTER4_ADDRESS);
+
+		println!(
+			"Cache Hit rate = {}%",
+			((hit_num * 100) as f32 / (hit_num + miss_num) as f32) as f32
+		);
+		println!(
+			"Cache Miss rate = {}%",
+			((miss_num * 100) as f32 / (hit_num + miss_num) as f32) as f32
+		);
+		println!("Cache Hit Latency = {} cycles", L1_CACHE_HIT_LATENCY);
 	}
 
 	/// Method for running [`riscv-tests`](https://github.com/riscv/riscv-tests) program.
@@ -255,6 +293,7 @@ impl Emulator {
 		});
 
 		if self.tohost_addr != 0 {
+			// @TODO : modify this rule
 			self.is_test = true;
 			self.cpu.get_mut_mmu().init_memory(TEST_MEMORY_CAPACITY);
 		} else {
