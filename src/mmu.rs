@@ -12,6 +12,9 @@ use memory::Memory;
 /// It also manages virtual-physical address translation and memoty protection.
 /// It may also be said Bus.
 /// @TODO: Memory protection is not implemented yet. We should support.
+
+pub const TLB_ENTRY_NUM : usize= 64;
+
 pub struct Mmu {
 	pub clock: u64,
 	pub xlen: Xlen,
@@ -23,6 +26,9 @@ pub struct Mmu {
 	/// Address translation can be affected `mstatus` (MPRV, MPP in machine mode)
 	/// then `Mmu` has copy of it.
 	pub mstatus: u64,
+	pub tlb_tag : [u64;TLB_ENTRY_NUM],
+	pub tlb_value :[u64;TLB_ENTRY_NUM],
+	pub tlb_bitnum : usize,
 }
 
 pub enum AddressingMode {
@@ -62,6 +68,9 @@ impl Mmu {
 			privilege_mode: PrivilegeMode::Machine,
 			memory: MemoryWrapper::new(),
 			mstatus: 0,
+			tlb_tag:[0;TLB_ENTRY_NUM],
+			tlb_value:[0;TLB_ENTRY_NUM],
+			tlb_bitnum:0,
 		}
 	}
 
@@ -638,7 +647,7 @@ impl Mmu {
 				},
 				PrivilegeMode::User | PrivilegeMode::Supervisor => {
 					let vpns = [(address >> 12) & 0x3ff, (address >> 22) & 0x3ff];
-					self.traverse_page(address, 2 - 1, self.ppn, &vpns, &access_type)
+					self.tlb_or_pagewalk(address, 2 - 1, self.ppn, &vpns, &access_type)
 				}
 				_ => Ok(address),
 			},
@@ -671,7 +680,7 @@ impl Mmu {
 						(address >> 21) & 0x1ff,
 						(address >> 30) & 0x1ff,
 					];
-					self.traverse_page(address, 3 - 1, self.ppn, &vpns, &access_type)
+					self.tlb_or_pagewalk(address, 3 - 1, self.ppn, &vpns, &access_type)
 				}
 				_ => Ok(address),
 			},
@@ -682,7 +691,87 @@ impl Mmu {
 		p_address
 	}
 
-	fn traverse_page(
+	fn tlb_entry_search(
+		&mut self,
+		vpns:u64
+	) -> usize {
+		let mask = match self.addressing_mode {
+			AddressingMode::SV32 => ((1 << 12) - 1) ^ ((1 << 32) - 1),
+			_=> ((1 << 12) - 1) ^ ((1 << 39) - 1)
+		};
+
+		for i in 0..TLB_ENTRY_NUM {
+			if (vpns & mask) == (self.tlb_tag[i] & mask) {
+				// hit !
+				return i;
+			}
+		}
+		return TLB_ENTRY_NUM + 1;
+	}
+
+	fn tlb_entry_avaliable(
+		&mut self,
+		vpns: u64
+	) -> bool {
+		let i:usize = self.tlb_entry_search(vpns);
+		return (self.tlb_tag[i] & 1) == 1 && (i != TLB_ENTRY_NUM + 1);
+	}
+	
+	fn tlb_bitnum_increased(&mut self, i:usize) {
+		if self.tlb_tag[i] & 2 != 2 {
+			self.tlb_tag[i] = self.tlb_tag[i] | 2;  // bit PLRU algorithm
+			self.tlb_bitnum = self.tlb_bitnum + 1;
+			if self.tlb_bitnum == TLB_ENTRY_NUM {
+				for j in 0 .. TLB_ENTRY_NUM {
+					self.tlb_tag[j] = self.tlb_tag[j] & (!2);
+				}
+				self.tlb_bitnum = 0;
+			}
+		}
+	}
+
+	fn tlb_get_entry(
+		&mut self,
+		vpns: u64
+	) ->u64	{
+		let i:usize = self.tlb_entry_search(vpns);
+		self.tlb_bitnum_increased(i);
+		self.tlb_value[i]
+	}
+
+	fn tlb_update_entry(
+		&mut self,
+		vpns: u64,
+		new_pte: u64
+	) {
+		let i:usize = self.tlb_entry_search(vpns);
+		if i == TLB_ENTRY_NUM + 1 {
+			// find if exist free entry
+			for j in 0..TLB_ENTRY_NUM {
+				if self.tlb_tag[j] & 1 == 0 {
+					// found free entry
+					self.tlb_tag[j] = vpns | 1;
+					self.tlb_value[j] = new_pte;
+					self.tlb_bitnum_increased(j);
+					return;
+				}
+			}
+			// no free entry, select a victim
+			for j in 0..TLB_ENTRY_NUM {
+				if self.tlb_tag[j] & 2 == 0 {
+					// found victim, swap it 
+					self.tlb_tag[j] = vpns | 1;
+					self.tlb_value[j] = new_pte;
+					self.tlb_bitnum_increased(j);
+				}
+			}
+			// no victim 
+			println!("tlb_update_entry error: no free slot or victim, this situation shouldnt occur!");
+			panic!();
+		}
+	}	
+
+	fn tlb_or_pagewalk(
 		&mut self,
 		v_address: u64,
 		level: u8,
@@ -696,9 +785,39 @@ impl Mmu {
 			_ => 8,
 		};
 		let pte_address = parent_ppn * pagesize + vpns[level as usize] * ptesize;
+		let vpn = match self.addressing_mode {
+			AddressingMode::SV32=>(vpns[0] << 12) | (vpns[1] << 22),
+			AddressingMode::SV39=>(vpns[0] << 12) | (vpns[1] << 21) | (vpns[2] << 30),
+			_=>(vpns[0] << 12) | (vpns[1] << 21) | (vpns[2] << 30)
+		} as u64;
 		let pte = match self.addressing_mode {
-			AddressingMode::SV32 => self.load_word_raw(pte_address) as u64,
-			_ => self.load_doubleword_raw(pte_address),
+			AddressingMode::SV32 => match self.tlb_entry_avaliable(vpn) {
+				true=>self.tlb_get_entry(vpn),
+				_=>{
+					let tmp = self.load_word_raw(pte_address) as u64;
+					let tmp_x = (tmp >> 3) & 1;
+					let tmp_w = (tmp >> 2) & 1;
+					let tmp_r = (tmp >> 1) & 1;
+					if tmp_x != 0 || tmp_r != 0 || tmp_w != 0 { // a leaf PTE
+						self.tlb_update_entry(vpn,tmp);
+					}
+					tmp
+				},
+
+			},  
+			_ => match self.tlb_entry_avaliable(vpn) {
+				true=>self.tlb_get_entry(vpn),
+				_=>{
+					let tmp = self.load_doubleword_raw(pte_address);
+					let tmp_x = (tmp >> 3) & 1;
+					let tmp_w = (tmp >> 2) & 1;
+					let tmp_r = (tmp >> 1) & 1;
+					if tmp_x != 0 || tmp_r != 0 || tmp_w != 0 {
+						self.tlb_update_entry(vpn,tmp);
+					}
+					tmp
+				},
+			} 
 		};
 		let ppn = match self.addressing_mode {
 			AddressingMode::SV32 => (pte >> 10) & 0x3fffff,
@@ -732,7 +851,7 @@ impl Mmu {
 		if r == 0 && x == 0 {
 			return match level {
 				0 => Err(()),
-				_ => self.traverse_page(v_address, level - 1, ppn, vpns, access_type),
+				_ => self.tlb_or_pagewalk(v_address, level - 1, ppn, vpns, access_type),
 			};
 		}
 
@@ -808,6 +927,7 @@ impl Mmu {
 		Ok(p_address)
 	}
 }
+	
 
 /// [`Memory`](../memory/struct.Memory.html) wrapper. Converts physical address to the one in memory
 /// using [`DRAM_BASE`](constant.DRAM_BASE.html) and accesses [`Memory`](../memory/struct.Memory.html).
