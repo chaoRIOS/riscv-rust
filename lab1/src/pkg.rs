@@ -1,4 +1,7 @@
 #![allow(unused)]
+#[macro_use]
+
+
 // use crate::utils::*;
 use fnv::FnvHashMap;
 use riscv_emu_rust::cpu::*;
@@ -9,8 +12,10 @@ use std::fs::File;
 use std::io::Read;
 use std::collections::HashMap; 
 use std::{mem, slice};
-
+use std::sync::Mutex;
 /// GLOBAL EMULATOR.
+
+
 pub static mut EMULATOR: Emulator = Emulator {
 	cpu: Cpu {
 		clock: 0,
@@ -32,7 +37,6 @@ pub static mut EMULATOR: Emulator = Emulator {
 				memory: Memory { data: vec![] },
 			},
 			mstatus: 0,
-			tlb: HashMap::new(),
 		},
 		reservation: 0,
 		is_reservation_set: false,

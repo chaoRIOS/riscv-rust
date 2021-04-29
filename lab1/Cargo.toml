@@ -14,3 +14,4 @@ getopts = "0.2"
 pancurses = "0.16.1"
 riscv_emu_rust = {path = "../"}
 fnv = "1.0.7"
+lazy_static = "1.4.0"

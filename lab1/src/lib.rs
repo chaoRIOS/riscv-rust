@@ -60,7 +60,6 @@ pub unsafe extern "C" fn dpi_fetch_decode(
 		EMULATOR.format_map = Some(_format_map);
 		EMULATOR.fu_map = Some(_fu_map);
 		EMULATOR.op_map = Some(_op_map);
-
 		let mut elf_file =
 			match File::open("/opt/orv64-merge/rrv64/tb/test_program/benchmarks/dhrystone.riscv") {
 				Ok(f) => f,

@@ -3,11 +3,16 @@
 pub const DRAM_BASE: u64 = 0x80000000;
 
 extern crate fnv;
+extern crate lazy_static;
 
 use std::collections::HashMap; 
 use cpu::{get_privilege_mode, PrivilegeMode, Trap, TrapType, Xlen};
 use memory::Memory;
-
+use std::sync::Mutex;
+use self::lazy_static::*;
+lazy_static!{
+	pub static ref tlb:Mutex<HashMap<u64,u64>> =  Mutex::new(HashMap::new());
+}
 /// Emulates Memory Management Unit. It holds the Main memory and peripheral
 /// devices, maps address to them, and accesses them depending on address.
 /// It also manages virtual-physical address translation and memoty protection.
@@ -24,9 +29,7 @@ pub struct Mmu {
 	/// Address translation can be affected `mstatus` (MPRV, MPP in machine mode)
 	/// then `Mmu` has copy of it.
 	pub mstatus: u64,
-	pub tlb:HashMap<u64,u64>,
 }
-
 
 
 pub enum AddressingMode {
@@ -57,6 +60,7 @@ impl Mmu {
 	///
 	/// # Arguments
 	/// * `xlen`
+	
 	pub fn new(xlen: Xlen) -> Self {
 		Mmu {
 			clock: 0,
@@ -66,7 +70,6 @@ impl Mmu {
 			privilege_mode: PrivilegeMode::Machine,
 			memory: MemoryWrapper::new(),
 			mstatus: 0,
-			tlb:HashMap::new(),
 		}
 	}
 
@@ -711,9 +714,10 @@ impl Mmu {
 		&mut self,
 		vpns: u64
 	) -> u64 {
+		let mut _tlb = tlb.lock().unwrap();
 		match self.addressing_mode {
-			AddressingMode::SV32 => (self.tlb[&vpns] >> 32) & 1,
-			_=> (self.tlb[&vpns]>>54) & 1
+			AddressingMode::SV32 => (_tlb[&vpns] >> 32) & 1,
+			_=> (_tlb[&vpns]>>54) & 1
 		}
 	}
 	
@@ -721,9 +725,10 @@ impl Mmu {
 		&mut self,
 		vpns: u64
 	) ->u64	{
+		let mut _tlb = tlb.lock().unwrap();
 		match self.addressing_mode {
-			AddressingMode::SV32 => self.tlb[&vpns] & ((1 << 32) - 1),
-			_=>self.tlb[&vpns] & ((1 << 54) - 1)
+			AddressingMode::SV32 => _tlb[&vpns] & ((1 << 32) - 1),
+			_=>_tlb[&vpns] & ((1 << 54) - 1)
 		}
 	}
 
@@ -732,8 +737,10 @@ impl Mmu {
 		vpns: u64,
 		new_pte: u64
 	) {
+		let mut _tlb = tlb.lock().unwrap();
 		let value = new_pte | (1 << match self.addressing_mode {AddressingMode::SV32=>32,_=>54});
-		self.tlb.insert(vpns,value);
+		_tlb.insert(vpns,value);
+
 	}
 	fn tlb_or_pagewalk(
 		&mut self,

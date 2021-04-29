@@ -1,5 +1,7 @@
 #![allow(unused)]
+#[macro_use]
 
+extern crate lazy_static;
 extern crate getopts;
 extern crate riscv_emu_rust;
 
