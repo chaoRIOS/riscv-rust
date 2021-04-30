@@ -821,7 +821,7 @@ impl Mmu {
 	/// # Arguments
 	/// * `p_address` Physical address
 	/// * `value` data written
-	fn store_doubleword_raw(&mut self, p_address: u64, value: u64) {
+	pub fn store_doubleword_raw(&mut self, p_address: u64, value: u64) {
 		let effective_address = self.get_effective_address(p_address);
 		match effective_address >= DRAM_BASE
 			&& effective_address.wrapping_add(7) > effective_address
@@ -951,6 +951,11 @@ impl Mmu {
 		};
 
 		for i in 0..TLB_ENTRY_NUM {
+			/*
+			if self.tlb_tag[i] & 1 == 1 {
+				return i;
+			}
+			*/
 			if (vpns & mask) == (self.tlb_tag[i] & mask) {
 				// hit !
 				return i;
@@ -1055,7 +1060,9 @@ impl Mmu {
 				},
 
 			},  
-			_ => match self.tlb_entry_avaliable(vpn) {
+			_ => {
+				self.load_doubleword_raw(pte_address) 
+				/*match self.tlb_entry_avaliable(vpn) {
 				true=>self.tlb_get_entry(vpn),
 				_=>{
 					let tmp = self.load_doubleword_raw(pte_address);
@@ -1066,7 +1073,7 @@ impl Mmu {
 						self.tlb_update_entry(vpn,tmp);
 					}
 					tmp
-				},
+				},*/
 			} 
 		};
 		let ppn = match self.addressing_mode {

@@ -71,7 +71,8 @@ pub unsafe extern "C" fn dpi_fetch_decode(
 			Ok(_) => {}
 			Err(_) => panic!("Failed to read ELF"),
 		};
-		EMULATOR.setup_program(elf_contents);
+		let mut memdump_contents = vec![];
+		EMULATOR.setup_program(elf_contents,memdump_contents);
 	}
 
 	// Check input signals

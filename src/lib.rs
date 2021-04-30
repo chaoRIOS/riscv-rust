@@ -237,7 +237,7 @@ impl Emulator {
 	/// * `data` Program binary
 	// @TODO: Make ElfAnalyzer and move the core logic there.
 	// @TODO: Returns `Err` if the passed contend doesn't seem ELF file
-	pub fn setup_program(&mut self, data: Vec<u8>) {
+	pub fn setup_program(&mut self, data: Vec<u8>, memdump_contents:Vec<u8>) {
 		let analyzer = ElfAnalyzer::new(data);
 
 		if !analyzer.validate() {
@@ -299,6 +299,44 @@ impl Emulator {
 		} else {
 			self.is_test = false;
 			self.cpu.get_mut_mmu().init_memory(PROGRAM_MEMORY_CAPACITY);
+		}
+		let mut iter_num = 0;
+		loop {
+			let mut left_addr : u64 = 0;
+			{
+				while memdump_contents[iter_num] != 'x' as u8{
+					iter_num = iter_num + 1;
+				}
+				for j in iter_num+1 .. memdump_contents.len() {
+					if memdump_contents[j] == 32 || memdump_contents[j] == 10 {
+						iter_num = j;
+						break;
+					} else {
+						left_addr = left_addr * 16 + memdump_contents[j] as u64 - 48;
+					}
+				}
+			}
+			let mut right_value : u64 = 0;
+			{
+				while memdump_contents[iter_num] != 'x' as u8{
+					iter_num = iter_num + 1;
+				}
+				for j in iter_num+1 .. memdump_contents.len() {
+					if memdump_contents[j] == 32 || memdump_contents[j] == 10 {
+						iter_num = j;
+						break;
+					} else {
+						right_value = right_value * 16 + memdump_contents[j] as u64 - 48;
+					}
+				}
+
+			}
+	//		self.cpu.get_mut_mmu().store_doubleword_raw(left_addr, right_value);
+			println!("[debug log] commiting value {} to addr {}",right_value,left_addr);
+			iter_num = iter_num + 1;
+			if iter_num >= memdump_contents.len() {
+				break;
+			}
 		}
 
 		for i in 0..program_data_section_headers.len() {
