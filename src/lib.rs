@@ -16,9 +16,8 @@ pub mod l2cache;
 pub mod memory;
 pub mod mmu;
 
-use cpu::{Cpu, Xlen, CSR_HPMCOUNTER3_ADDRESS, CSR_HPMCOUNTER4_ADDRESS, CSR_MCYCLE_ADDRESS};
+use cpu::{Cpu, Xlen};
 use elf_analyzer::ElfAnalyzer;
-use l1cache::L1_CACHE_HIT_LATENCY;
 
 /// RISC-V emulator. It emulates RISC-V CPU and peripheral devices.
 ///
@@ -76,13 +75,13 @@ impl Emulator {
 	pub fn run(&mut self) {
 		match self.is_test {
 			true => self.run_test(),
-			false => self.run_program(),
+			false => self.run_program(false, ""),
 		};
 	}
 
 	/// Runs program set by `setup_program()`. The emulator won't stop forever.
 	/// * Added our print function.
-	pub fn run_program(&mut self) {
+	pub fn run_program(&mut self, trace_memory_access: bool, trace_path: &str) {
 		loop {
 			#[cfg(debug_assertions)]
 			{
@@ -91,85 +90,8 @@ impl Emulator {
 				self.put_bytes_to_terminal(&[10]); // new line
 			}
 
-			let tohost_data_addr = match self.cpu.get_mut_mmu().load_word(self.tohost_addr) {
-				Ok(data) => {
-					self.cpu.clock = self.cpu.clock.wrapping_sub(1);
-					data
-				}
-				Err(e) => {
-					self.cpu.handle_exception(e, self.cpu.read_pc());
-					0
-				}
-			};
-			// use raw interfaces to reserve clock cycles
-			if tohost_data_addr != 0 {
-				match tohost_data_addr {
-					0..=0x80000000 => {
-						break;
-					}
-					_ => {
-						// @TODO: optimize
-						let flag1 = self
-							.cpu
-							.get_mut_mmu()
-							.load_word_raw((24 + tohost_data_addr) as u64)
-							!= 0;
-						let flag2 = self
-							.cpu
-							.get_mut_mmu()
-							.load_word_raw((28 + tohost_data_addr) as u64)
-							!= 0;
-						if flag1 || flag2 {
-							let base = self
-								.cpu
-								.get_mut_mmu()
-								.load_word_raw((4 * 4 + tohost_data_addr) as u64);
-							let length = self
-								.cpu
-								.get_mut_mmu()
-								.load_word_raw((6 * 4 + tohost_data_addr) as u64);
-							for i in 0..length {
-								let data = self.cpu.get_mut_mmu().load_raw((i + base) as u64);
-								print!("{}", data as char);
-							}
-						}
-
-						// After printf, set 1 to fromhost and set 0 to tohost
-						// Note: host needs to access cache instead of memory!
-						match self
-							.cpu
-							.get_mut_mmu()
-							.store_word(self.tohost_addr + 0x40, 1)
-						{
-							Ok(()) => {}
-							_ => panic!("Set fromhost Failed"),
-						};
-						match self.cpu.get_mut_mmu().store_word(self.tohost_addr, 0) {
-							Ok(()) => {}
-							_ => panic!("Reset tohost Failed"),
-						};
-					}
-				};
-			}
-			self.tick();
+			self.tick(trace_memory_access, trace_path);
 		}
-
-		println!(
-			"Latency = {} cycles",
-			self.get_cpu().read_csr_raw(CSR_MCYCLE_ADDRESS)
-		);
-		let hit_num = self.get_cpu().read_csr_raw(CSR_HPMCOUNTER3_ADDRESS);
-		let miss_num = self.get_cpu().read_csr_raw(CSR_HPMCOUNTER4_ADDRESS);
-
-		println!(
-			"Cache Hit rate = {}%",
-			((hit_num * 100) as f32 / (hit_num + miss_num) as f32) as f32
-		);
-		println!(
-			"Cache Miss rate = {}%",
-			((miss_num * 100) as f32 / (hit_num + miss_num) as f32) as f32
-		);
-		println!("Cache Hit Latency = {} cycles", L1_CACHE_HIT_LATENCY);
 	}
 
 	/// Method for running [`riscv-tests`](https://github.com/riscv/riscv-tests) program.
@@ -185,7 +107,7 @@ impl Emulator {
 			self.put_bytes_to_terminal(disas.as_bytes());
 			self.put_bytes_to_terminal(&[10]); // new line
 
-			self.tick();
+			self.tick(false, "");
 
 			// It seems in riscv-tests ends with end code
 			// written to a certain physical memory address
@@ -225,8 +147,8 @@ impl Emulator {
 	}
 
 	/// Runs CPU one cycle
-	pub fn tick(&mut self) {
-		self.cpu.tick();
+	pub fn tick(&mut self, trace_memory_access: bool, trace_path: &str) {
+		self.cpu.tick(trace_memory_access, trace_path);
 	}
 
 	/// Sets up program run by the program. This method analyzes the passed content
@@ -269,6 +191,7 @@ impl Emulator {
 			// None => 0x80001ea8,
 			None => 0x80001198,
 		};
+		self.cpu.tohost_addr = self.tohost_addr;
 
 		// Creates symbol - virtual address mapping
 		if string_table_section_headers.len() > 0 {
@@ -312,7 +235,14 @@ impl Emulator {
 						iter_num = j;
 						break;
 					} else {
-						left_addr = left_addr * 16 + memdump_contents[j] as u64 - 48;
+						let mut tmp = memdump_contents[j];
+						if memdump_contents[j] >= 'a' as u8 &&  memdump_contents[j] <= 'f' as u8 {
+							tmp = tmp - 'a' as u8 + 10 + 48;
+						} 
+						if memdump_contents[j] >= 'A' as u8 &&  memdump_contents[j] <= 'F' as u8 {
+							tmp = tmp - 'A' as u8 + 10 + 48;
+						} 
+						left_addr = left_addr * 16 + tmp as u64 - 48;
 					}
 				}
 			}
@@ -326,12 +256,19 @@ impl Emulator {
 						iter_num = j;
 						break;
 					} else {
-						right_value = right_value * 16 + memdump_contents[j] as u64 - 48;
+						let mut tmp = memdump_contents[j];
+						if memdump_contents[j] >= 'a' as u8 &&  memdump_contents[j] <= 'f' as u8 {
+							tmp = tmp - 'a' as u8 + 10 + 48;
+						} 
+						if memdump_contents[j] >= 'A' as u8 &&  memdump_contents[j] <= 'F' as u8 {
+							tmp = tmp - 'A' as u8 + 10 + 48;
+						} 
+						right_value = right_value * 16 + tmp as u64 - 48;
 					}
 				}
 
 			}
-	//		self.cpu.get_mut_mmu().store_doubleword_raw(left_addr, right_value);
+			self.cpu.get_mut_mmu().store_doubleword_raw(left_addr, right_value);
 			println!("[debug log] commiting value {} to addr {}",right_value,left_addr);
 			iter_num = iter_num + 1;
 			if iter_num >= memdump_contents.len() {

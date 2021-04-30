@@ -1,6 +1,10 @@
 extern crate fnv;
 
-use mmu::{AddressingMode, Mmu};
+use std::fs::OpenOptions;
+use std::io::prelude::*;
+use std::process;
+
+use mmu::{AddressingMode, MemoryAccessType, Mmu};
 
 pub const CSR_CAPACITY: usize = 4096;
 
@@ -47,6 +51,9 @@ const _CSR_INSERT_ADDRESS: u16 = 0xc02;
 
 pub const CSR_HPMCOUNTER3_ADDRESS: u16 = 0xc03;
 pub const CSR_HPMCOUNTER4_ADDRESS: u16 = 0xc04;
+pub const CSR_HPMCOUNTER5_ADDRESS: u16 = 0xc05;
+pub const CSR_HPMCOUNTER6_ADDRESS: u16 = 0xc06;
+pub const CSR_HPMCOUNTER7_ADDRESS: u16 = 0xc07;
 
 const _CSR_MHARTID_ADDRESS: u16 = 0xf14;
 
@@ -75,6 +82,7 @@ pub struct Cpu {
 	pub is_reservation_set: bool,
 	pub _dump_flag: bool,
 	pub unsigned_data_mask: u64,
+	pub tohost_addr: u64,
 }
 
 #[derive(Clone)]
@@ -231,6 +239,7 @@ impl Cpu {
 			is_reservation_set: false,
 			_dump_flag: false,
 			unsigned_data_mask: 0xffffffffffffffff,
+			tohost_addr: 0,
 		};
 		cpu.x[0xb] = 0x1020; // I don't know why but Linux boot seems to require this initialization
 		cpu.write_csr_raw(CSR_MISA_ADDRESS, 0x800000008014312f);
@@ -276,15 +285,34 @@ impl Cpu {
 	}
 
 	/// Runs program one cycle. Fetch, decode, and execution are completed in a cycle so far.
-	pub fn tick(&mut self) {
+	pub fn tick(&mut self, trace_memory_access: bool, trace_path: &str) {
 		let instruction_address = self.pc;
 		match self.tick_operate() {
 			Ok(()) => {}
 			Err(e) => self.handle_exception(e, instruction_address),
 		}
-		self.clock = self
-			.clock
-			.wrapping_add(self.mmu.tick(&mut self.csr[CSR_MIP_ADDRESS as usize]));
+		if trace_memory_access == true {
+			for i in 0..self.mmu.memory_access_trace.len() {
+				let mut file = OpenOptions::new().append(true).open(trace_path).unwrap();
+
+				file.write(
+					format!(
+						"0x{:08x} {} {}\n",
+						self.mmu.memory_access_trace[i].address,
+						match self.mmu.memory_access_trace[i].operation {
+							MemoryAccessType::Read => "READ",
+							MemoryAccessType::Write => "WRITE",
+							_ => "",
+						},
+						self.mmu.memory_access_trace[i].cycle + self.clock
+					)
+					.as_bytes(),
+				)
+				.unwrap();
+			}
+		}
+		let mmu_latency = self.mmu.tick(&mut self.csr[CSR_MIP_ADDRESS as usize]);
+		self.clock = self.clock.wrapping_add(mmu_latency);
 		self.handle_interrupt(self.pc);
 		// self.clock = self.clock.wrapping_add(1);
 
@@ -295,6 +323,12 @@ impl Cpu {
 		self.write_csr_raw(CSR_MCYCLE_ADDRESS, self.clock);
 		self.write_csr_raw(CSR_HPMCOUNTER3_ADDRESS, self.mmu.l1_cache.hit_num);
 		self.write_csr_raw(CSR_HPMCOUNTER4_ADDRESS, self.mmu.l1_cache.miss_num);
+		self.write_csr_raw(CSR_HPMCOUNTER5_ADDRESS, self.mmu.l2_cache.hit_num);
+		self.write_csr_raw(CSR_HPMCOUNTER6_ADDRESS, self.mmu.l2_cache.miss_num);
+		self.write_csr_raw(
+			CSR_HPMCOUNTER7_ADDRESS,
+			self.read_csr_raw(CSR_HPMCOUNTER7_ADDRESS) + mmu_latency,
+		);
 	}
 
 	// @TODO: Rename?
@@ -328,7 +362,6 @@ impl Cpu {
 				let result = (inst.operation)(self, word, instruction_address);
 				self.x[0] = 0; // hardwired zero
 				self.clock = self.clock.wrapping_add(cycles.into()); // 32-bit length non-compressed instruction
-
 				return result;
 			}
 			Err(()) => {
@@ -346,7 +379,91 @@ impl Cpu {
 	/// The result will be stored to cache.
 	pub fn decode(&mut self, word: u32) -> Result<&Instruction, ()> {
 		match self.decode_and_get_instruction_index(word) {
-			Ok(index) => Ok(&INSTRUCTIONS[index]),
+			Ok(index) => {
+				// Handle to/from host
+				let inst = &INSTRUCTIONS[index];
+				match inst.name {
+					"SD" | "SW" | "SH" | "SB" => {
+						let f = parse_format_s(word);
+						if self.x[f.rs1].wrapping_add(f.imm) == (self.tohost_addr as i64) {
+							let tohost_addr = self.tohost_addr;
+							let tohost_data_addr = self.x[f.rs2];
+							match tohost_data_addr {
+								0..=0x80000000 => {
+									// Exit
+									//
+									println!(
+										"Latency = {} cycles",
+										self.read_csr_raw(CSR_MCYCLE_ADDRESS)
+									);
+									// L1 Cache hit/miss
+									let l1_hit_num = self.read_csr_raw(CSR_HPMCOUNTER3_ADDRESS);
+									let l1_miss_num = self.read_csr_raw(CSR_HPMCOUNTER4_ADDRESS);
+									// L2 Cache hit/miss
+									let _l2_hit_num = self.read_csr_raw(CSR_HPMCOUNTER5_ADDRESS);
+									let l2_miss_num = self.read_csr_raw(CSR_HPMCOUNTER6_ADDRESS);
+									// MAT
+									let memory_access_time =
+										self.read_csr_raw(CSR_HPMCOUNTER7_ADDRESS);
+									println!(
+										"Cache Hit rate = {}%",
+										100f32
+											* (1f32
+												- (l2_miss_num as f32
+													/ (l1_hit_num + l1_miss_num) as f32))
+									);
+									println!(
+										"Cache Miss rate = {}%",
+										((l2_miss_num * 100) as f32
+											/ (l1_hit_num + l1_miss_num) as f32) as f32
+									);
+
+									// AMAT
+									println!(
+										"Cache Hit Latency = {} cycles",
+										memory_access_time / (l1_hit_num + l1_miss_num)
+									);
+
+									process::exit(0);
+								}
+								_ => {
+									// Tohost I/O stream
+									//
+									// @TODO: optimize
+									let flag1 = self
+										.get_mut_mmu()
+										.load_word_raw((24 + tohost_data_addr) as u64)
+										!= 0;
+									let flag2 = self
+										.get_mut_mmu()
+										.load_word_raw((28 + tohost_data_addr) as u64)
+										!= 0;
+									if flag1 || flag2 {
+										let base = self
+											.get_mut_mmu()
+											.load_word_raw((4 * 4 + tohost_data_addr) as u64);
+										let length = self
+											.get_mut_mmu()
+											.load_word_raw((6 * 4 + tohost_data_addr) as u64);
+										for i in 0..length {
+											let data =
+												self.get_mut_mmu().load_raw((i + base) as u64);
+											print!("{}", data as char);
+										}
+									}
+
+									// After printf, set 1 to fromhost and set 0 to tohost
+									// Note: host needs to access cache instead of memory!
+									self.get_mut_mmu().store_word_raw(tohost_addr + 0x40, 1);
+									self.get_mut_mmu().store_word_raw(tohost_addr, 0);
+								}
+							};
+						}
+					}
+					_ => {}
+				}
+				Ok(&INSTRUCTIONS[index])
+			}
 			Err(()) => Err(()),
 		}
 	}
@@ -2504,6 +2621,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		operation: |cpu, _word, _address| {
 			// Flush write back L1 cache
 			cpu.get_mut_mmu().l1_flush();
+			cpu.get_mut_mmu().l2_flush();
 			Ok(())
 		},
 		disassemble: dump_empty,

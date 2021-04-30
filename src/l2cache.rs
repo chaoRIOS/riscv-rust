@@ -18,7 +18,7 @@ pub const L2_CACHE_SET_NUMBER: i32 = L2_CACHE_SIZE / (L2_CACHE_BLOCK_SIZE * L2_S
 
 /// L2 cache line format
 pub const L2_CACHE_OFFSET_BITS: i32 = 6;
-pub const L2_CACHE_INDEX_BITS: i32 = 6;
+pub const L2_CACHE_INDEX_BITS: i32 = 6 + 3;
 pub const L2_CACHE_TAG_BITS: i32 = 32 - L2_CACHE_OFFSET_BITS - L2_CACHE_INDEX_BITS;
 
 /// 64B cache block size
@@ -220,9 +220,18 @@ impl L2Cache {
 	///
 	/// # Arguments
 	/// * `index`: index of cache set
-	pub fn allocate_new_line(&self, _index: u64, policy: PlacementPolicy) -> u8 {
+	pub fn allocate_new_line(&self, index: u64, policy: PlacementPolicy) -> u8 {
 		match policy {
-			PlacementPolicy::Random => random::<u8>() % (L2_SET_ASSOCIATIVE_WAY as u8),
+			PlacementPolicy::Random => {
+				let mut non_inclusive_ways = vec![];
+				for way in 0..L2_SET_ASSOCIATIVE_WAY {
+					if self.data[index as usize].data[way as usize].l1_inclusive == false {
+						non_inclusive_ways.push(way);
+					}
+				}
+				non_inclusive_ways[(random::<u8>() % (non_inclusive_ways.len() as u8)) as usize]
+					as u8
+			}
 			PlacementPolicy::LRU => {
 				// @TODO: LRU
 				0
