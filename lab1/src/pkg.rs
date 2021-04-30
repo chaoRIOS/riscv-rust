@@ -34,15 +34,19 @@ pub static mut EMULATOR: Emulator = Emulator {
 			},
 			l1_cache: L1Cache::static_new(),
 			l2_cache: L2Cache::static_new(),
+
+			memory_access_trace: vec![],
+
 			mstatus: 0,
-			tlb_tag: [0;TLB_ENTRY_NUM],
-			tlb_value: [0;TLB_ENTRY_NUM],
+			tlb_tag: [0; TLB_ENTRY_NUM],
+			tlb_value: [0; TLB_ENTRY_NUM],
 			tlb_bitnum: 0,
 		},
 		reservation: 0,
 		is_reservation_set: false,
 		_dump_flag: false,
 		unsigned_data_mask: 0xffffffffffffffff,
+		tohost_addr: 0,
 	},
 
 	symbol_map: None,

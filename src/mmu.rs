@@ -27,6 +27,8 @@ pub struct Mmu {
 	pub l1_cache: L1Cache,
 	pub l2_cache: L2Cache,
 
+	pub memory_access_trace: Vec<MemoryAccessTrace>,
+
 	/// Address translation can be affected `mstatus` (MPRV, MPP in machine mode)
 	/// then `Mmu` has copy of it.
 	pub mstatus: u64,
@@ -42,7 +44,13 @@ pub enum AddressingMode {
 	SV48, // @TODO: Implement
 }
 
-enum MemoryAccessType {
+pub struct MemoryAccessTrace {
+	pub address: u64,
+	pub operation: MemoryAccessType,
+	pub cycle: u64,
+}
+
+pub enum MemoryAccessType {
 	Execute,
 	Read,
 	Write,
@@ -73,6 +81,9 @@ impl Mmu {
 			memory: MemoryWrapper::new(),
 			l1_cache: L1Cache::new(),
 			l2_cache: L2Cache::new(),
+
+			memory_access_trace: vec![],
+
 			mstatus: 0,
 			tlb_tag: [0; TLB_ENTRY_NUM],
 			tlb_value: [0; TLB_ENTRY_NUM],
@@ -100,6 +111,9 @@ impl Mmu {
 	pub fn tick(&mut self, _mip: &mut u64) -> u64 {
 		let mmu_latency = self.clock;
 		self.clock = 0;
+		if self.memory_access_trace.len() > 0 {
+			self.memory_access_trace = vec![];
+		}
 		mmu_latency as u64
 	}
 
@@ -257,6 +271,10 @@ impl Mmu {
 			| (l1_index << L1_CACHE_OFFSET_BITS);
 
 		// Write back to L2
+		// Latency for checking
+		self.clock = self.clock.wrapping_add(L1_CACHE_HIT_LATENCY as u64);
+		// Latency for checking
+		self.clock = self.clock.wrapping_add(L2_CACHE_HIT_LATENCY as u64);
 		match self.l2_cache.read_line_info(write_back_address) {
 			Ok(l2_way) => {
 				let l2_index: u64 =
@@ -286,8 +304,13 @@ impl Mmu {
 		match victim.valid {
 			true => {
 				self.l1_write_back(victim, index);
+				// Latency for checking
+				self.clock = self.clock.wrapping_add(L1_CACHE_HIT_LATENCY as u64);
 			}
-			false => {}
+			false => {
+				// Latency for checking
+				self.clock = self.clock.wrapping_add(L1_CACHE_HIT_LATENCY as u64);
+			}
 		}
 
 		Ok(way as u64)
@@ -333,9 +356,9 @@ impl Mmu {
 	/// * `victim_cache_line`: the line needs to be written back
 	/// * `index`: index of the line
 	fn l2_write_back(&mut self, victim_cache_line: L2CacheLine, index: u64) {
-		let mut _write_back_address = 0 as u64;
+		let mut write_back_address = 0 as u64;
 		// [ tag | index | 000000 ]
-		_write_back_address = _write_back_address
+		write_back_address = write_back_address
 			| (victim_cache_line.tag << (L2_CACHE_INDEX_BITS + L2_CACHE_OFFSET_BITS))
 			| (index << L2_CACHE_OFFSET_BITS);
 
@@ -343,8 +366,21 @@ impl Mmu {
 		// @TODO: optimize
 		for i in 0..(L2_CACHE_BLOCK_SIZE / 8) as u64 {
 			self.memory
-				.write_doubleword(_write_back_address + i * 8, victim_cache_line.get(i * 8, 8));
+				.write_doubleword(write_back_address + i * 8, victim_cache_line.get(i * 8, 8));
 		}
+
+		// Latency for checking
+		self.clock = self.clock.wrapping_add(L2_CACHE_HIT_LATENCY as u64);
+
+		// Trace memory access
+		self.memory_access_trace.push(MemoryAccessTrace {
+			address: write_back_address,
+			operation: MemoryAccessType::Write,
+			cycle: self.clock,
+		});
+
+		// Latency for accessing memory
+		self.clock = self.clock.wrapping_add(L2_CACHE_MISS_LATENCY as u64);
 	}
 
 	/// Allocate a new L2 entry
@@ -364,8 +400,13 @@ impl Mmu {
 		match victim.valid {
 			true => {
 				self.l2_write_back(victim, index);
+				// Latency for checking
+				self.clock = self.clock.wrapping_add(L2_CACHE_HIT_LATENCY as u64);
 			}
-			false => {}
+			false => {
+				// Latency for checking
+				self.clock = self.clock.wrapping_add(L2_CACHE_HIT_LATENCY as u64);
+			}
 		}
 
 		Ok(way as u64)
@@ -425,7 +466,6 @@ impl Mmu {
 				// L1 miss
 
 				// Performance counter
-				self.clock = self.clock.wrapping_add(L1_CACHE_MISS_LATENCY as u64);
 				self.l1_cache.miss_num += 1;
 
 				// pre-parse index
@@ -434,6 +474,9 @@ impl Mmu {
 				let l2_tag: u64 = p_address >> (L2_CACHE_INDEX_BITS + L2_CACHE_OFFSET_BITS);
 
 				// Allocate L1 entry
+				// Latency of L1 miss handler:
+				// Check: if no write back
+				// Check + Check_L2(must hit) + Check: if write back
 				let l1_way_allocated = self.l1_miss_handler(l1_index).unwrap();
 
 				// Aquire a new line
@@ -445,8 +488,10 @@ impl Mmu {
 						// L1 miss but L2 hit
 
 						// Performance counter
-						self.clock = self.clock.wrapping_add(L2_CACHE_HIT_LATENCY as u64);
 						self.l2_cache.hit_num += 1;
+
+						// Latency for checking
+						self.clock = self.clock.wrapping_add(L2_CACHE_HIT_LATENCY as u64);
 
 						// Refill with hitted L2 line
 						new_line.data_blocks =
@@ -475,7 +520,6 @@ impl Mmu {
 						// L1 miss and L2 miss
 
 						// Performance counter
-						self.clock = self.clock.wrapping_add(L2_CACHE_MISS_LATENCY as u64);
 						self.l2_cache.miss_num += 1;
 
 						// Access memory
@@ -484,6 +528,13 @@ impl Mmu {
 						let p_address_aligned =
 							(p_address >> L1_CACHE_OFFSET_BITS) << L1_CACHE_OFFSET_BITS;
 
+						// Latency for misshandler:
+						// Check: if no write back
+						// Check + memory access + Check : if write back
+						let l2_way_allocated = self.l2_miss_handler(l2_index).unwrap();
+
+						// Access memory for new line
+						//
 						#[cfg(debug_assertions)]
 						println!("refill from {:x}", p_address_aligned);
 						for i in 0..L1_CACHE_BLOCK_SIZE {
@@ -491,7 +542,15 @@ impl Mmu {
 								self.load_raw(p_address_aligned + i as u64);
 						}
 
-						let l2_way_allocated = self.l2_miss_handler(l2_index).unwrap();
+						// Trace memory access
+						self.memory_access_trace.push(MemoryAccessTrace {
+							address: p_address_aligned,
+							operation: MemoryAccessType::Read,
+							cycle: self.clock,
+						});
+
+						// Latency for accessing memory
+						self.clock = self.clock.wrapping_add(L2_CACHE_MISS_LATENCY as u64);
 
 						// Refill L2 with new line
 						match self.l2_refill(

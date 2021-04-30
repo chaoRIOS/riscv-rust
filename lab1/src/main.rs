@@ -22,7 +22,7 @@ fn run_elf(file_path: &str) -> std::io::Result<()> {
 		EMULATOR.setup_program(elf_contents);
 		EMULATOR.update_xlen(Xlen::Bit64);
 
-		EMULATOR.run_program();
+		EMULATOR.run_program(false);
 	}
 	Ok(())
 }
