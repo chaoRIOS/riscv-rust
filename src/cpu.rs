@@ -91,7 +91,7 @@ pub enum Xlen {
 	Bit64, // @TODO: Support Bit128
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 #[allow(dead_code)]
 pub enum PrivilegeMode {
 	User,
@@ -297,7 +297,7 @@ impl Cpu {
 
 				file.write(
 					format!(
-						"0x{:08x} {} {}\n",
+						"0x{:016x} {} {}\n",
 						self.mmu.memory_access_trace[i].address,
 						match self.mmu.memory_access_trace[i].operation {
 							MemoryAccessType::Read => "READ",
@@ -938,7 +938,7 @@ impl Cpu {
 		self.csr[CSR_FCSR_ADDRESS as usize] |= 0x1;
 	}
 
-	fn update_addressing_mode(&mut self, value: u64) {
+	pub fn update_addressing_mode(&mut self, value: u64) {
 		let addressing_mode = match self.xlen {
 			Xlen::Bit32 => match value & 0x80000000 {
 				0 => AddressingMode::None,

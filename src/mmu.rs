@@ -2,6 +2,9 @@
 /// is the address in main memory.
 pub const DRAM_BASE: u64 = 0x80000000;
 
+/// @TODO: (dev)Enable TLB
+const ENABLE_TLB: bool = true;
+
 extern crate fnv;
 
 use cpu::{get_privilege_mode, PrivilegeMode, Trap, TrapType, Xlen};
@@ -37,6 +40,7 @@ pub struct Mmu {
 	pub tlb_bitnum: usize,
 }
 
+#[derive(Debug)]
 pub enum AddressingMode {
 	None,
 	SV32,
@@ -1161,24 +1165,27 @@ impl Mmu {
 						self.tlb_update_entry(vpn, tmp);
 					}
 					tmp
-				},
-
-			},  
+				}
+			},
 			_ => {
-				self.load_doubleword_raw(pte_address) 
-				/*match self.tlb_entry_avaliable(vpn) {
-				true=>self.tlb_get_entry(vpn),
-				_=>{
-					let tmp = self.load_doubleword_raw(pte_address);
-					let tmp_x = (tmp >> 3) & 1;
-					let tmp_w = (tmp >> 2) & 1;
-					let tmp_r = (tmp >> 1) & 1;
-					if tmp_x != 0 || tmp_r != 0 || tmp_w != 0 {
-						self.tlb_update_entry(vpn, tmp);
+				if ENABLE_TLB == true {
+					match self.tlb_entry_avaliable(vpn) {
+						true => self.tlb_get_entry(vpn),
+						_ => {
+							let tmp = self.load_doubleword_raw(pte_address);
+							let tmp_x = (tmp >> 3) & 1;
+							let tmp_w = (tmp >> 2) & 1;
+							let tmp_r = (tmp >> 1) & 1;
+							if tmp_x != 0 || tmp_r != 0 || tmp_w != 0 {
+								self.tlb_update_entry(vpn, tmp);
+							}
+							tmp
+						}
 					}
-					tmp
-				},*/
-			} 
+				} else {
+					self.load_doubleword_raw(pte_address)
+				}
+			}
 		};
 		let ppn = match self.addressing_mode {
 			AddressingMode::SV32 => (pte >> 10) & 0x3fffff,
