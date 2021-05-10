@@ -385,6 +385,13 @@ impl Cpu {
 				match inst.name {
 					"SD" | "SW" | "SH" | "SB" => {
 						let f = parse_format_s(word);
+						#[cfg(debug_assertions)]
+						println!(
+							"{} {:x} to {:x}",
+							inst.name,
+							self.x[f.rs2],
+							self.x[f.rs1].wrapping_add(f.imm)
+						);
 						if self.x[f.rs1].wrapping_add(f.imm) == (self.tohost_addr as i64) {
 							let tohost_addr = self.tohost_addr;
 							let tohost_data_addr = self.x[f.rs2];

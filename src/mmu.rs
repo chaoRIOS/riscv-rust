@@ -1081,7 +1081,11 @@ impl Mmu {
 
 	fn tlb_entry_avaliable(&mut self, vpns: u64) -> bool {
 		let i: usize = self.tlb_entry_search(vpns);
-		return (self.tlb_tag[i] & 1) == 1 && (i != TLB_ENTRY_NUM + 1);
+		if i > TLB_ENTRY_NUM {
+			return false;
+		} else {
+			return (self.tlb_tag[i] & 1) == 1;
+		}
 	}
 
 	fn tlb_bitnum_increased(&mut self, i: usize) {
