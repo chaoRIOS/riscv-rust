@@ -6,13 +6,17 @@ RELEASE_PATH=$(PROJ_DIR)/target/release
 
 COREMARK_PATH = /home/zfu/rios/apd_from_lab1/apd/tb/test_program/coremark/coremark.riscv
 DHRYSTONE_PATH = /home/zfu/rios/apd_from_lab1/apd/tb/test_program/benchmarks/dhrystone.riscv
-ADD_PATH = /home/zfu/rios/apd_from_lab1/apd/tb/riscv-tests/isa/rv64ui-v-add
-PHYDUMP_PATH = /home/cwang/work/riscv-rust/lab2/phydump.txt
-
+PHYDUMP_PATH = /home/ychen/riscv-rust/lab2/phydump.txt
+RV64UI_PATH =/home/ychen/riscv-rust/lab2/rv64ui-v-add
 TRACE_PATH = /home/cwang/work/riscv-rust/lab2/trace.dump
+SAMPLEDUMP_PATH=/home/ychen/riscv-rust/lab2/stream.txt
+SAMPLE_PATH=/home/ychen/riscv-rust/lab2/stream.o
 
-cmodule = interface
+run_sample:
+	cargo run --release -- -m $(SAMPLEDUMP_PATH) -i $(SAMPLE_PATH)
 
+run_rv64ui-v-add:
+	cargo run --release -- -m $(PHYDUMP_PATH) -i $(RV64UI_PATH)
 
 run_phydump:
 	cargo run --release -- -m $(PHYDUMP_PATH) -i $(COREMARK_PATH)
@@ -27,7 +31,7 @@ run_dhrystone:
 run_add:
 	RUSTFLAGS="-L $(PROJ_DIR)/lab2/csrc"  cargo build --release 
 	LD_LIBRARY_PATH="$(PROJ_DIR)/lab2/csrc" $(RELEASE_PATH)/lab2 -m $(PHYDUMP_PATH) -i $(ADD_PATH) 
-
+cmodule = interface
 test:
 	$(MAKE) -C csrc $(cmodule)
 	RUSTFLAGS="-L $(PROJ_DIR)/lab2/csrc" cargo build

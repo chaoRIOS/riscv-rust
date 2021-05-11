@@ -227,7 +227,7 @@ impl Cpu {
 		let mut cpu = Cpu {
 			clock: 0,
 			xlen: Xlen::Bit64,
-			privilege_mode: PrivilegeMode::Machine,
+			privilege_mode: PrivilegeMode::User,
 			wfi: false,
 			x: [0; 32],
 			f: [0.0; 32],
@@ -846,7 +846,12 @@ impl Cpu {
 		}
 	}
 
-	fn write_csr(&mut self, address: u16, value: u64) -> Result<(), Trap> {
+	pub fn write_csr(&mut self, address: u16, value: u64) -> Result<(), Trap> {
+		if address == CSR_SATP_ADDRESS { // tempoary for lab2 
+			println!("Warn: Changing SATP to {}",value);
+			self.update_addressing_mode(value);
+			return Ok(());
+		}
 		match self.has_csr_access_privilege(address) {
 			true => {
 				/*
@@ -858,6 +863,7 @@ impl Cpu {
 				*/
 				self.write_csr_raw(address, value);
 				if address == CSR_SATP_ADDRESS {
+					println!("Warn: Changing SATP to {}",value);
 					self.update_addressing_mode(value);
 				}
 				Ok(())

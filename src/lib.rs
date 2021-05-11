@@ -1,6 +1,6 @@
 // @TODO: temporal
-const TEST_MEMORY_CAPACITY: u64 = 1024 * 1024 * 512;
-const PROGRAM_MEMORY_CAPACITY: u64 = 1024 * 1024 * 128; // big enough to run Linux and xv6
+const TEST_MEMORY_CAPACITY: u64 = 1024 * 1024 * 2048;
+const PROGRAM_MEMORY_CAPACITY: u64 = 1024 * 1024 * 2049; // big enough to run Linux and xv6
 
 extern crate fnv;
 extern crate rand;
@@ -249,7 +249,7 @@ impl Emulator {
 			}
 			let mut right_value: u64 = 0;
 			{
-				while memdump_contents[iter_num] != 'x' as u8 {
+				while memdump_contents[iter_num] != ' ' as u8 {
 					iter_num = iter_num + 1;
 				}
 				for j in iter_num + 1..memdump_contents.len() {
@@ -268,13 +268,10 @@ impl Emulator {
 					}
 				}
 			}
+			//println!("[debug log] commiting value {} to addr {}",right_value,left_addr);
 			self.cpu
 				.get_mut_mmu()
 				.store_doubleword_raw(left_addr, right_value);
-			println!(
-				"[debug log] commiting value {} to addr {}",
-				right_value, left_addr
-			);
 			iter_num = iter_num + 1;
 			if iter_num >= memdump_contents.len() {
 				break;
@@ -294,6 +291,10 @@ impl Emulator {
 			}
 		}
 
+		match self.cpu.write_csr(0x180, 0x8000000000080016) {
+			Ok(()) => {}
+			_ => {}
+		} // write SATP
 		self.cpu.update_pc(header.e_entry);
 	}
 

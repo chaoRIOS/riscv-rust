@@ -27,6 +27,11 @@ impl Memory {
 	pub fn read_byte(&self, address: u64) -> u8 {
 		let index = (address >> 3) as usize;
 		let pos = ((address % 8) as u64) * 8;
+		/*
+		if index > self.data.len() {
+			println!("big address error : {}",address);
+			return 0;
+		}*/
 		(self.data[index] >> pos) as u8
 	}
 

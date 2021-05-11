@@ -3,7 +3,7 @@
 pub const DRAM_BASE: u64 = 0x80000000;
 
 /// @TODO: (dev)Enable TLB
-const ENABLE_TLB: bool = true;
+const ENABLE_TLB: bool = false;
 
 extern crate fnv;
 
@@ -82,7 +82,7 @@ impl Mmu {
 			xlen: xlen,
 			ppn: 0,
 			addressing_mode: AddressingMode::None,
-			privilege_mode: PrivilegeMode::Machine,
+			privilege_mode: PrivilegeMode::User,
 			memory: MemoryWrapper::new(),
 			l1_cache: L1Cache::new(),
 			l2_cache: L2Cache::new(),
@@ -135,6 +135,7 @@ impl Mmu {
 	/// # Arguments
 	/// * `mode`
 	pub fn update_privilege_mode(&mut self, mode: PrivilegeMode) {
+		println!("Warn: changing PRIVILEGE MODE to {}",match mode {PrivilegeMode::Machine=>"machine",PrivilegeMode::Supervisor=>"sup",PrivilegeMode::User=>"user",PrivilegeMode::Reserved=>"resev",_=>"panic"});
 		self.privilege_mode = mode;
 	}
 
@@ -990,8 +991,12 @@ impl Mmu {
 		access_type: &MemoryAccessType,
 	) -> Result<u64, ()> {
 		let address = self.get_effective_address(v_address);
+		println!("detecter VADDR={}",address);
 		let p_address = match self.addressing_mode {
-			AddressingMode::None => Ok(address),
+			AddressingMode::None => {
+				println!("AddressingMode==NONE");
+				Ok(address)
+			},
 			AddressingMode::SV32 => match self.privilege_mode {
 				// @TODO: Optimize
 				PrivilegeMode::Machine => match access_type {
@@ -1024,11 +1029,18 @@ impl Mmu {
 				// @TODO: Optimize
 				// @TODO: Remove duplicated code with SV32
 				PrivilegeMode::Machine => match access_type {
-					MemoryAccessType::Execute => Ok(address),
+					MemoryAccessType::Execute => {
+						println!("AddressingMode=SV39 Machine Execute");
+						Ok(address)
+					},
 					// @TODO: Remove magic number
 					_ => match (self.mstatus >> 17) & 1 {
-						0 => Ok(address),
+						0 => {
+							println!("AddressingMode=SV39 Machine else mstatus 17bit=1");
+							Ok(address)
+						},
 						_ => {
+							println!("AddressingMode=SV39 Machine else mstatus 17bit!=1");
 							let privilege_mode = get_privilege_mode((self.mstatus >> 9) & 3);
 							match privilege_mode {
 								PrivilegeMode::Machine => Ok(address),
@@ -1049,6 +1061,7 @@ impl Mmu {
 						(address >> 21) & 0x1ff,
 						(address >> 30) & 0x1ff,
 					];
+					println!("AddressingMode=SV39 user");
 					self.tlb_or_pagewalk(address, 3 - 1, self.ppn, &vpns, &access_type)
 				}
 				_ => Ok(address),
@@ -1057,6 +1070,10 @@ impl Mmu {
 				panic!("AddressingMode SV48 is not supported yet.");
 			}
 		};
+		match p_address {
+			Ok(address) => println!("detecter PADDR={}",p_address.unwrap()),
+			_=>{println!("ERROR: at translate_address paddr==err(())");}
+		}
 		p_address
 	}
 
@@ -1095,7 +1112,7 @@ impl Mmu {
 			self.tlb_bitnum = self.tlb_bitnum + 1;
 			if self.tlb_bitnum == TLB_ENTRY_NUM {
 				for j in 0..TLB_ENTRY_NUM {
-					self.tlb_tag[j] = self.tlb_tag[j] & (!2);
+					self.tlb_tag[j] = self.tlb_tag[j] & (!(2 as u64))
 				}
 				self.tlb_bitnum = 0;
 			}
@@ -1105,6 +1122,7 @@ impl Mmu {
 	fn tlb_get_entry(&mut self, vpns: u64) -> u64 {
 		let i: usize = self.tlb_entry_search(vpns);
 		self.tlb_bitnum_increased(i);
+		println!("tlb_get_entry: id={},tag[id]={},value[id]={}",i,self.tlb_tag[i],self.tlb_value[i]);
 		self.tlb_value[i]
 	}
 
@@ -1117,6 +1135,7 @@ impl Mmu {
 					// found free entry
 					self.tlb_tag[j] = vpns | 1;
 					self.tlb_value[j] = new_pte;
+					println!("tlb_update_entry: id={},tag[id]={},value[id]={}",j,self.tlb_tag[j],self.tlb_value[j]);
 					self.tlb_bitnum_increased(j);
 					return;
 				}
@@ -1127,6 +1146,7 @@ impl Mmu {
 					// found victim, swap it
 					self.tlb_tag[j] = vpns | 1;
 					self.tlb_value[j] = new_pte;
+					println!("tlb_update_entry: id={},tag[id]={},value[id]={}",j,self.tlb_tag[j],self.tlb_value[j]);
 					self.tlb_bitnum_increased(j);
 				}
 			}
