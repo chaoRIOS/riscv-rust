@@ -84,7 +84,7 @@ impl Emulator {
 	/// * Added our print function.
 	pub fn run_program(&mut self, trace_memory_access: bool, trace_path: &str) {
 		loop {
-			#[cfg(debug_assertions)]
+			#[cfg(feature = "debug-disassemble")]
 			{
 				let disas = self.cpu.disassemble_next_instruction();
 				self.put_bytes_to_terminal(disas.as_bytes());

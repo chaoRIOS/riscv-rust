@@ -340,8 +340,11 @@ impl Mmu {
 	/// * `cache_line` : target cache line
 	pub fn l1_refill(&mut self, index: u64, way: u64, cache_line: L1CacheLine) -> Result<(), ()> {
 		// Place the line
-		#[cfg(debug_assertions)]
-		println!("refill[{}][{}]: {:x?}", index, way, cache_line.data_blocks);
+		#[cfg(feature = "debug-cache")]
+		println!(
+			"refill L1[{}][{}]: {:x?}",
+			index, way, cache_line.data_blocks
+		);
 		self.l1_cache.data[index as usize].data[way as usize] = cache_line;
 		self.l1_cache.data[index as usize].data[way as usize].valid = true;
 		Ok(())
@@ -455,8 +458,11 @@ impl Mmu {
 	/// * `cache_line` : target cache line
 	pub fn l2_refill(&mut self, index: u64, way: u64, cache_line: L2CacheLine) -> Result<(), ()> {
 		// Place the line
-		#[cfg(debug_assertions)]
-		println!("refill[{}][{}]: {:x?}", index, way, cache_line.data_blocks);
+		#[cfg(feature = "debug-cache")]
+		println!(
+			"refill L2[{}][{}]: {:x?}",
+			index, way, cache_line.data_blocks
+		);
 		self.l2_cache.data[index as usize].data[way as usize] = cache_line;
 		self.l2_cache.data[index as usize].data[way as usize].valid = true;
 		Ok(())
@@ -569,7 +575,7 @@ impl Mmu {
 
 						// Access memory for new line
 						//
-						#[cfg(debug_assertions)]
+						#[cfg(feature = "debug-cache")]
 						println!("refill from {:x}", p_address_aligned);
 						for i in 0..L1_CACHE_BLOCK_SIZE {
 							new_line.data_blocks[i as usize] =
@@ -673,8 +679,8 @@ impl Mmu {
 		match (v_address & 0xfff) <= (0x1000 - width) {
 			true => match self.translate_address(v_address, &MemoryAccessType::Read) {
 				Ok(p_address) => {
-					#[cfg(debug_assertions)]
-					println!("\nload {} @ 0x{:x}", width, p_address);
+					#[cfg(feature = "debug-cache")]
+					println!("\nload {}bytes @ 0x{:x}", width, p_address);
 
 					// pre-parse index
 					let l1_index: u64 =
@@ -775,8 +781,11 @@ impl Mmu {
 					// Store to cache
 					// @TODO: store buffer
 					// Get allocated cache line's way index
-					#[cfg(debug_assertions)]
-					println!("\nstore {} @ 0x{:x}", width, p_address);
+					#[cfg(feature = "debug-cache")]
+					println!(
+						"\nstore 0x{:x} of {}bytes @ 0x{:x}",
+						value, width, p_address
+					);
 
 					// pre-parse index
 					let l1_index: u64 =

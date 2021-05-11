@@ -17,7 +17,11 @@ exclude = [
 members = [".", "lab1", "lab2"]
 
 [features]
+debug = ["debug-cache", "debug-dramsim", "debug-disassemble", "debug-tohost"]
+debug-cache = []
 debug-dramsim = []
+debug-disassemble = []
+debug-tohost = []
 
 [badges]
 travis-ci = { repository = "takahirox/riscv-rust" }

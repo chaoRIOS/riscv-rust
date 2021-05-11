@@ -128,7 +128,7 @@ impl L1Cache {
 			let _line = _l1_cache_set.data[_way as usize];
 			if (_line.tag == tag) && (_line.valid == true) {
 				// hit
-				#[cfg(debug_assertions)]
+				#[cfg(feature = "debug-cache")]
 				println!("Hit [{}][{}]", index, _way);
 				return Ok(_line);
 			}
@@ -150,7 +150,7 @@ impl L1Cache {
 			let _line = _l1_cache_set.data[_way as usize];
 			if (_line.tag == tag) && (_line.valid == true) {
 				// hit
-				#[cfg(debug_assertions)]
+				#[cfg(feature = "debug-cache")]
 				println!("Hit [{}][{}]", index, _way);
 				return Ok(_way as u64);
 			}
@@ -179,13 +179,13 @@ impl L1Cache {
 		match self.read_line_raw(tag, index) {
 			// hit
 			Ok(cache_line) => {
-				#[cfg(debug_assertions)]
+				#[cfg(feature = "debug-cache")]
 				println!("Hit {:x}", p_address);
 				Ok(cache_line)
 			}
 			// miss
 			_ => {
-				#[cfg(debug_assertions)]
+				#[cfg(feature = "debug-cache")]
 				println!("Miss {:x}", p_address);
 				Err(())
 			}
@@ -204,13 +204,13 @@ impl L1Cache {
 		match self.read_line_info_raw(tag, index) {
 			// hit
 			Ok(_way) => {
-				#[cfg(debug_assertions)]
+				#[cfg(feature = "debug-cache")]
 				println!("Hit {:x}", p_address);
 				Ok(_way)
 			}
 			// miss
 			_ => {
-				#[cfg(debug_assertions)]
+				#[cfg(feature = "debug-cache")]
 				println!("Miss {:x}", p_address);
 				Err(())
 			}

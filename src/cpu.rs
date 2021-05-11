@@ -4,6 +4,8 @@ use std::fs::OpenOptions;
 use std::io::prelude::*;
 use std::process;
 
+use l1cache::L1_CACHE_HIT_LATENCY;
+use l2cache::L2_CACHE_HIT_LATENCY;
 use mmu::{AddressingMode, MemoryAccessType, Mmu};
 
 pub const CSR_CAPACITY: usize = 4096;
@@ -402,9 +404,9 @@ impl Cpu {
 				match inst.name {
 					"SD" | "SW" | "SH" | "SB" => {
 						let f = parse_format_s(word);
-						#[cfg(debug_assertions)]
+						#[cfg(feature = "debug-tohost")]
 						println!(
-							"{} {:x} to {:x}",
+							"[Tohost] {} {:x} to {:x}",
 							inst.name,
 							self.x[f.rs2],
 							self.x[f.rs1].wrapping_add(f.imm)
@@ -447,6 +449,14 @@ impl Cpu {
 									// 	"Cache Hit Latency = {} cycles",
 									// 	memory_access_time / (l1_hit_num + l1_miss_num)
 									// );
+
+									// Average hit latency
+									println!(
+										"Cache Hit Latency = {} cycles",
+										(l1_hit_num as f32 * L1_CACHE_HIT_LATENCY as f32
+											+ l1_miss_num as f32 * L2_CACHE_HIT_LATENCY as f32)
+											/ (l1_hit_num as f32 + l1_miss_num as f32)
+									);
 
 									process::exit(0);
 								}
