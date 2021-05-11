@@ -6,4 +6,7 @@
 *csv
 lab2/csrc/*.so
 lab2/*.log
+lab2/*.txt
+lab2/*.s
+lab2/*.o
 .vscode*
