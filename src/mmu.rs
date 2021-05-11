@@ -8,6 +8,7 @@ const ENABLE_TLB: bool = true;
 extern crate fnv;
 
 use cpu::{get_privilege_mode, PrivilegeMode, Trap, TrapType, Xlen};
+use dram::*;
 use l1cache::*;
 use l2cache::*;
 use memory::Memory;
