@@ -113,13 +113,13 @@ impl Mmu {
 	}
 
 	/// Runs one cycle of MMU and peripheral devices.
-	pub fn tick(&mut self, _mip: &mut u64) -> u64 {
-		let mmu_latency = self.clock;
-		self.clock = 0;
+	pub fn tick(&mut self, _mip: &mut u64) {
+		// mmu clock is synced in cpu.tick()
+
+		// Flush memory access trace
 		if self.memory_access_trace.len() > 0 {
 			self.memory_access_trace = vec![];
 		}
-		mmu_latency as u64
 	}
 
 	/// Updates addressing mode
@@ -396,11 +396,16 @@ impl Mmu {
 
 		// Communicate with dramsim through pipe
 		// @TODO: Blocked
-		while let -1 =
-			send_request(format!("{:016x} {} {}", write_back_address, "WRITE", self.clock).as_str())
-		{}
+		send_request(format!("{:016x} {} {}", write_back_address, "WRITE", self.clock).as_str());
+		#[cfg(feature = "debug-dramsim")]
+		println!(
+			"Send {:?}",
+			format!("{:016x} {} {}", write_back_address, "WRITE", self.clock)
+		);
 
 		let response_string = get_response();
+		#[cfg(feature = "debug-dramsim")]
+		println!("Resp {:?}", response_string);
 
 		// Latency for accessing memory
 		self.clock = response_string
@@ -580,12 +585,19 @@ impl Mmu {
 
 						// Communicate with dramsim through pipe
 						// @TODO: Blocked
-						while let -1 = send_request(
+						send_request(
 							format!("{:016x} {} {}", p_address_aligned, "READ", self.clock)
 								.as_str(),
-						) {}
+						);
+						#[cfg(feature = "debug-dramsim")]
+						println!(
+							"Send {:?}",
+							format!("{:016x} {} {}", p_address_aligned, "READ", self.clock)
+						);
 
 						let response_string = get_response();
+						#[cfg(feature = "debug-dramsim")]
+						println!("Resp {:?}", response_string);
 
 						// Latency for accessing memory
 						self.clock = response_string
@@ -1031,10 +1043,10 @@ impl Mmu {
 		access_type: &MemoryAccessType,
 	) -> Result<u64, ()> {
 		let address = self.get_effective_address(v_address);
-		println!("detecter VADDR={}", address);
+		// println!("detecter VADDR={}", address);
 		let p_address = match self.addressing_mode {
 			AddressingMode::None => {
-				println!("AddressingMode==NONE");
+				// println!("AddressingMode==NONE");
 				Ok(address)
 			}
 			AddressingMode::SV32 => match self.privilege_mode {
@@ -1070,17 +1082,17 @@ impl Mmu {
 				// @TODO: Remove duplicated code with SV32
 				PrivilegeMode::Machine => match access_type {
 					MemoryAccessType::Execute => {
-						println!("AddressingMode=SV39 Machine Execute");
+						// println!("AddressingMode=SV39 Machine Execute");
 						Ok(address)
 					}
 					// @TODO: Remove magic number
 					_ => match (self.mstatus >> 17) & 1 {
 						0 => {
-							println!("AddressingMode=SV39 Machine else mstatus 17bit=1");
+							// println!("AddressingMode=SV39 Machine else mstatus 17bit=1");
 							Ok(address)
 						}
 						_ => {
-							println!("AddressingMode=SV39 Machine else mstatus 17bit!=1");
+							// println!("AddressingMode=SV39 Machine else mstatus 17bit!=1");
 							let privilege_mode = get_privilege_mode((self.mstatus >> 9) & 3);
 							match privilege_mode {
 								PrivilegeMode::Machine => Ok(address),
@@ -1101,7 +1113,7 @@ impl Mmu {
 						(address >> 21) & 0x1ff,
 						(address >> 30) & 0x1ff,
 					];
-					println!("AddressingMode=SV39 user");
+					// println!("AddressingMode=SV39 user");
 					self.tlb_or_pagewalk(address, 3 - 1, self.ppn, &vpns, &access_type)
 				}
 				_ => Ok(address),
@@ -1111,7 +1123,9 @@ impl Mmu {
 			}
 		};
 		match p_address {
-			Ok(address) => println!("detecter PADDR={}", p_address.unwrap()),
+			Ok(address) => {
+				// println!("detecter PADDR={}", p_address.unwrap());
+			}
 			_ => {
 				println!("ERROR: at translate_address paddr==err(())");
 			}

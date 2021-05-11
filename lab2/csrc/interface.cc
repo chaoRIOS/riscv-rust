@@ -82,8 +82,12 @@ int SendRqst(char* str){
 	 * 0000000083000000 READ 100
 	 * 0000000082000000 WRITE 160
 	 */
-     printf("Sending %s\n",str);
-	return write( mfd, str, 41 );	
+    // printf("Sending %s\n",str);
+    int i = write( mfd, str, 41 );
+    if (i<0) {
+        printf("Send failed: %s\n", strerror(errno));
+    }
+	return i;	
 
 }
 
@@ -105,6 +109,7 @@ int RecvResp(){
 extern "C"
 char* RecvRespString(){
     strcat(addr_recv,cycle_recv);
+    // printf("Recieving %s\n",addr_recv);
     return addr_recv;
 }
 

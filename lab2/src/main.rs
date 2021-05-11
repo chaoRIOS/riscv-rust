@@ -31,7 +31,7 @@ fn run_elf(
 	elf_file.read_to_end(&mut elf_contents)?;
 	setup_pipe(
 		"/home/cwang/work/riscv-rust/lab2/rqst_to_memory",
-		"/home/cwang/work/riscv-rust/lab2/resp_to_cpu ",
+		"/home/cwang/work/riscv-rust/lab2/resp_to_cpu",
 	);
 	unsafe {
 		EMULATOR.setup_program(elf_contents, memdump_contents);

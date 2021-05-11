@@ -16,6 +16,9 @@ exclude = [
 [workspace]
 members = [".", "lab1", "lab2"]
 
+[features]
+debug-dramsim = []
+
 [badges]
 travis-ci = { repository = "takahirox/riscv-rust" }
 

@@ -48,7 +48,11 @@ fn recieve_response_string() -> String {
 /// Poll the pipe until reseponse available
 pub fn get_response() -> String {
 	// Poll
-	while let -1 = recieve_response() {}
+	loop {
+		if recieve_response() > 0 {
+			break;
+		}
+	}
 
 	// Resolve
 	recieve_response_string()
