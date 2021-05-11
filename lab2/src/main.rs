@@ -5,7 +5,10 @@ extern crate riscv_emu_rust;
 
 extern crate lab1;
 
-use riscv_emu_rust::cpu::Xlen;
+use riscv_emu_rust::{
+	cpu::Xlen,
+	dram::{setup_pipe, terminate_pipe},
+};
 
 use getopts::Options;
 use std::env;
@@ -26,11 +29,16 @@ fn run_elf(
 	let mut elf_file = File::open(input_path)?;
 	let mut elf_contents = vec![];
 	elf_file.read_to_end(&mut elf_contents)?;
+	setup_pipe(
+		"/home/cwang/work/riscv-rust/lab2/rqst_to_memory",
+		"/home/cwang/work/riscv-rust/lab2/resp_to_cpu ",
+	);
 	unsafe {
 		EMULATOR.setup_program(elf_contents, memdump_contents);
 		EMULATOR.update_xlen(Xlen::Bit64);
 		EMULATOR.run_program(trace_memory_access, trace_path);
 	}
+	terminate_pipe();
 	Ok(())
 }
 

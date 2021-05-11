@@ -135,7 +135,16 @@ impl Mmu {
 	/// # Arguments
 	/// * `mode`
 	pub fn update_privilege_mode(&mut self, mode: PrivilegeMode) {
-		println!("Warn: changing PRIVILEGE MODE to {}",match mode {PrivilegeMode::Machine=>"machine",PrivilegeMode::Supervisor=>"sup",PrivilegeMode::User=>"user",PrivilegeMode::Reserved=>"resev",_=>"panic"});
+		println!(
+			"Warn: changing PRIVILEGE MODE to {}",
+			match mode {
+				PrivilegeMode::Machine => "machine",
+				PrivilegeMode::Supervisor => "sup",
+				PrivilegeMode::User => "user",
+				PrivilegeMode::Reserved => "resev",
+				_ => "panic",
+			}
+		);
 		self.privilege_mode = mode;
 	}
 
@@ -385,8 +394,22 @@ impl Mmu {
 			cycle: self.clock,
 		});
 
+		// Communicate with dramsim through pipe
+		// @TODO: Blocked
+		while let -1 =
+			send_request(format!("{:016x} {} {}", write_back_address, "WRITE", self.clock).as_str())
+		{}
+
+		let response_string = get_response();
+
 		// Latency for accessing memory
-		self.clock = self.clock.wrapping_add(L2_CACHE_MISS_LATENCY as u64);
+		self.clock = response_string
+			.split(" ")
+			.last()
+			.unwrap()
+			.parse::<u64>()
+			.unwrap();
+		// self.clock = self.clock.wrapping_add(L2_CACHE_MISS_LATENCY as u64);
 	}
 
 	/// Allocate a new L2 entry
@@ -555,8 +578,25 @@ impl Mmu {
 							cycle: self.clock,
 						});
 
+						// Communicate with dramsim through pipe
+						// @TODO: Blocked
+						while let -1 = send_request(
+							format!("{:016x} {} {}", p_address_aligned, "READ", self.clock)
+								.as_str(),
+						) {}
+
+						let response_string = get_response();
+
 						// Latency for accessing memory
-						self.clock = self.clock.wrapping_add(L2_CACHE_MISS_LATENCY as u64);
+						self.clock = response_string
+							.split(" ")
+							.last()
+							.unwrap()
+							.parse::<u64>()
+							.unwrap();
+
+						// // Latency for accessing memory
+						// self.clock = self.clock.wrapping_add(L2_CACHE_MISS_LATENCY as u64);
 
 						// Refill L2 with new line
 						match self.l2_refill(
@@ -991,12 +1031,12 @@ impl Mmu {
 		access_type: &MemoryAccessType,
 	) -> Result<u64, ()> {
 		let address = self.get_effective_address(v_address);
-		println!("detecter VADDR={}",address);
+		println!("detecter VADDR={}", address);
 		let p_address = match self.addressing_mode {
 			AddressingMode::None => {
 				println!("AddressingMode==NONE");
 				Ok(address)
-			},
+			}
 			AddressingMode::SV32 => match self.privilege_mode {
 				// @TODO: Optimize
 				PrivilegeMode::Machine => match access_type {
@@ -1032,13 +1072,13 @@ impl Mmu {
 					MemoryAccessType::Execute => {
 						println!("AddressingMode=SV39 Machine Execute");
 						Ok(address)
-					},
+					}
 					// @TODO: Remove magic number
 					_ => match (self.mstatus >> 17) & 1 {
 						0 => {
 							println!("AddressingMode=SV39 Machine else mstatus 17bit=1");
 							Ok(address)
-						},
+						}
 						_ => {
 							println!("AddressingMode=SV39 Machine else mstatus 17bit!=1");
 							let privilege_mode = get_privilege_mode((self.mstatus >> 9) & 3);
@@ -1071,8 +1111,10 @@ impl Mmu {
 			}
 		};
 		match p_address {
-			Ok(address) => println!("detecter PADDR={}",p_address.unwrap()),
-			_=>{println!("ERROR: at translate_address paddr==err(())");}
+			Ok(address) => println!("detecter PADDR={}", p_address.unwrap()),
+			_ => {
+				println!("ERROR: at translate_address paddr==err(())");
+			}
 		}
 		p_address
 	}
@@ -1122,7 +1164,10 @@ impl Mmu {
 	fn tlb_get_entry(&mut self, vpns: u64) -> u64 {
 		let i: usize = self.tlb_entry_search(vpns);
 		self.tlb_bitnum_increased(i);
-		println!("tlb_get_entry: id={},tag[id]={},value[id]={}",i,self.tlb_tag[i],self.tlb_value[i]);
+		println!(
+			"tlb_get_entry: id={},tag[id]={},value[id]={}",
+			i, self.tlb_tag[i], self.tlb_value[i]
+		);
 		self.tlb_value[i]
 	}
 
@@ -1135,7 +1180,10 @@ impl Mmu {
 					// found free entry
 					self.tlb_tag[j] = vpns | 1;
 					self.tlb_value[j] = new_pte;
-					println!("tlb_update_entry: id={},tag[id]={},value[id]={}",j,self.tlb_tag[j],self.tlb_value[j]);
+					println!(
+						"tlb_update_entry: id={},tag[id]={},value[id]={}",
+						j, self.tlb_tag[j], self.tlb_value[j]
+					);
 					self.tlb_bitnum_increased(j);
 					return;
 				}
@@ -1146,7 +1194,10 @@ impl Mmu {
 					// found victim, swap it
 					self.tlb_tag[j] = vpns | 1;
 					self.tlb_value[j] = new_pte;
-					println!("tlb_update_entry: id={},tag[id]={},value[id]={}",j,self.tlb_tag[j],self.tlb_value[j]);
+					println!(
+						"tlb_update_entry: id={},tag[id]={},value[id]={}",
+						j, self.tlb_tag[j], self.tlb_value[j]
+					);
 					self.tlb_bitnum_increased(j);
 				}
 			}
