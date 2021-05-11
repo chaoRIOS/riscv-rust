@@ -16,7 +16,7 @@ pub static mut EMULATOR: Emulator = Emulator {
 	cpu: Cpu {
 		clock: 0,
 		xlen: Xlen::Bit64,
-		privilege_mode: PrivilegeMode::Machine,
+		privilege_mode: PrivilegeMode::User,
 		wfi: false,
 		x: [0; 32],
 		f: [0.0; 32],
@@ -28,7 +28,7 @@ pub static mut EMULATOR: Emulator = Emulator {
 			xlen: Xlen::Bit64,
 			ppn: 0,
 			addressing_mode: AddressingMode::None,
-			privilege_mode: PrivilegeMode::Machine,
+			privilege_mode: PrivilegeMode::User,
 			memory: MemoryWrapper {
 				memory: Memory { data: vec![] },
 			},
