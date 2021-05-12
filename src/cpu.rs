@@ -4,6 +4,8 @@ use std::fs::OpenOptions;
 use std::io::prelude::*;
 use std::process;
 
+use l1cache::L1_CACHE_HIT_LATENCY;
+use l2cache::L2_CACHE_HIT_LATENCY;
 use mmu::{AddressingMode, MemoryAccessType, Mmu};
 
 pub const CSR_CAPACITY: usize = 4096;
@@ -53,7 +55,7 @@ pub const CSR_HPMCOUNTER3_ADDRESS: u16 = 0xc03;
 pub const CSR_HPMCOUNTER4_ADDRESS: u16 = 0xc04;
 pub const CSR_HPMCOUNTER5_ADDRESS: u16 = 0xc05;
 pub const CSR_HPMCOUNTER6_ADDRESS: u16 = 0xc06;
-pub const CSR_HPMCOUNTER7_ADDRESS: u16 = 0xc07;
+pub const _CSR_HPMCOUNTER7_ADDRESS: u16 = 0xc07;
 
 const _CSR_MHARTID_ADDRESS: u16 = 0xf14;
 
@@ -300,8 +302,14 @@ impl Cpu {
 	pub fn tick(&mut self, trace_memory_access: bool, trace_path: &str) {
 		let instruction_address = self.pc;
 		match self.tick_operate() {
-			Ok(()) => {}
-			Err(e) => self.handle_exception(e, instruction_address),
+			Ok(pipeline_latency) => {
+				self.mmu.clock = self.mmu.clock.wrapping_add(pipeline_latency);
+				self.clock = self.mmu.clock;
+			}
+			Err(e) => {
+				self.clock = self.mmu.clock;
+				self.handle_exception(e, instruction_address);
+			}
 		}
 		if trace_memory_access == true {
 			for i in 0..self.mmu.memory_access_trace.len() {
@@ -316,15 +324,14 @@ impl Cpu {
 							MemoryAccessType::Write => "WRITE",
 							_ => "",
 						},
-						self.mmu.memory_access_trace[i].cycle + self.clock
+						self.mmu.memory_access_trace[i].cycle
 					)
 					.as_bytes(),
 				)
 				.unwrap();
 			}
 		}
-		let mmu_latency = self.mmu.tick(&mut self.csr[CSR_MIP_ADDRESS as usize]);
-		self.clock = self.clock.wrapping_add(mmu_latency);
+		self.mmu.tick(&mut self.csr[CSR_MIP_ADDRESS as usize]);
 		self.handle_interrupt(self.pc);
 		// self.clock = self.clock.wrapping_add(1);
 
@@ -337,19 +344,16 @@ impl Cpu {
 		self.write_csr_raw(CSR_HPMCOUNTER4_ADDRESS, self.mmu.l1_cache.miss_num);
 		self.write_csr_raw(CSR_HPMCOUNTER5_ADDRESS, self.mmu.l2_cache.hit_num);
 		self.write_csr_raw(CSR_HPMCOUNTER6_ADDRESS, self.mmu.l2_cache.miss_num);
-		self.write_csr_raw(
-			CSR_HPMCOUNTER7_ADDRESS,
-			self.read_csr_raw(CSR_HPMCOUNTER7_ADDRESS) + mmu_latency,
-		);
 	}
 
 	// @TODO: Rename?
-	fn tick_operate(&mut self) -> Result<(), Trap> {
+	fn tick_operate(&mut self) -> Result<u64, Trap> {
 		if self.wfi {
 			if (self.read_csr_raw(CSR_MIE_ADDRESS) & self.read_csr_raw(CSR_MIP_ADDRESS)) != 0 {
 				self.wfi = false;
 			}
-			return Ok(());
+			// @TODO: determine WFI latency
+			return Ok(1);
 		}
 
 		let original_word = match self.fetch() {
@@ -373,18 +377,33 @@ impl Cpu {
 			Ok(inst) => {
 				println!("inst={},pc={}",inst.get_name(),instruction_address);
 				let cycles = inst.cycles;
-				let result = (inst.operation)(self, word, instruction_address);
+				let _result = (inst.operation)(self, word, instruction_address);
 				self.x[0] = 0; // hardwired zero
-				self.clock = self.clock.wrapping_add(cycles.into()); // 32-bit length non-compressed instruction
-				return result;
+
+				// @TODO: why can't borrow result?
+				return Ok(cycles as u64);
+				// match result {
+				// 	Ok(()) => {
+				// 		return Ok(inst.cycles as u64);
+				// 	}
+				// 	Err(e) => {
+				// 		return Err(e);
+				// 	}
+				// }
 			}
 			Err(()) => {
-				panic!(
-					"Unknown instruction PC:{:x} WORD:{:x}",
-					instruction_address, original_word
-				);
+				// @TODO: illegal instructions
+				return Err(Trap {
+					trap_type: TrapType::IllegalInstruction,
+					value: self.pc,
+				});
+				// panic!(
+				// 	"Unknown instruction PC:{:x} WORD:{:x}",
+				// 	instruction_address, original_word
+				// );
 			}
 		};
+		Ok(0)
 	}
 
 	/// Decodes a word instruction data and returns a reference to
@@ -399,9 +418,9 @@ impl Cpu {
 				match inst.name {
 					"SD" | "SW" | "SH" | "SB" => {
 						let f = parse_format_s(word);
-						#[cfg(debug_assertions)]
+						#[cfg(feature = "debug-tohost")]
 						println!(
-							"{} {:x} to {:x}",
+							"[Tohost] {} {:x} to {:x}",
 							inst.name,
 							self.x[f.rs2],
 							self.x[f.rs1].wrapping_add(f.imm)
@@ -423,9 +442,9 @@ impl Cpu {
 									// L2 Cache hit/miss
 									let _l2_hit_num = self.read_csr_raw(CSR_HPMCOUNTER5_ADDRESS);
 									let l2_miss_num = self.read_csr_raw(CSR_HPMCOUNTER6_ADDRESS);
-									// MAT
-									let memory_access_time =
-										self.read_csr_raw(CSR_HPMCOUNTER7_ADDRESS);
+									// // MAT
+									// let memory_access_time =
+									// 	self.read_csr_raw(CSR_HPMCOUNTER7_ADDRESS);
 									println!(
 										"Cache Hit rate = {}%",
 										100f32
@@ -439,10 +458,18 @@ impl Cpu {
 											/ (l1_hit_num + l1_miss_num) as f32) as f32
 									);
 
-									// AMAT
+									// // AMAT
+									// println!(
+									// 	"Cache Hit Latency = {} cycles",
+									// 	memory_access_time / (l1_hit_num + l1_miss_num)
+									// );
+
+									// Average hit latency
 									println!(
 										"Cache Hit Latency = {} cycles",
-										memory_access_time / (l1_hit_num + l1_miss_num)
+										(l1_hit_num as f32 * L1_CACHE_HIT_LATENCY as f32
+											+ l1_miss_num as f32 * L2_CACHE_HIT_LATENCY as f32)
+											/ (l1_hit_num as f32 + l1_miss_num as f32)
 									);
 
 									process::exit(0);
@@ -861,8 +888,9 @@ impl Cpu {
 	}
 
 	pub fn write_csr(&mut self, address: u16, value: u64) -> Result<(), Trap> {
-		if address == CSR_SATP_ADDRESS { // tempoary for lab2 
-			println!("Warn: Changing SATP to {}",value);
+		if address == CSR_SATP_ADDRESS {
+			// tempoary for lab2
+			println!("Warn: Changing SATP to {}", value);
 			self.update_addressing_mode(value);
 			return Ok(());
 		}
@@ -877,7 +905,7 @@ impl Cpu {
 				*/
 				self.write_csr_raw(address, value);
 				if address == CSR_SATP_ADDRESS {
-					println!("Warn: Changing SATP to {}",value);
+					println!("Warn: Changing SATP to {}", value);
 					self.update_addressing_mode(value);
 				}
 				Ok(())

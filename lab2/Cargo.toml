@@ -8,5 +8,5 @@ edition = "2018"
 
 [dependencies]
 getopts = "0.2"
-riscv_emu_rust = {path = "../"}
+riscv_emu_rust = {path = "../", features = ["debug"]}
 lab1 = {path = "../lab1"}

@@ -8,6 +8,7 @@ const ENABLE_TLB: bool = true;
 extern crate fnv;
 
 use cpu::{get_privilege_mode, PrivilegeMode, Trap, TrapType, Xlen};
+use dram::*;
 use l1cache::*;
 use l2cache::*;
 use memory::Memory;
@@ -112,13 +113,13 @@ impl Mmu {
 	}
 
 	/// Runs one cycle of MMU and peripheral devices.
-	pub fn tick(&mut self, _mip: &mut u64) -> u64 {
-		let mmu_latency = self.clock;
-		self.clock = 0;
+	pub fn tick(&mut self, _mip: &mut u64) {
+		// mmu clock is synced in cpu.tick()
+
+		// Flush memory access trace
 		if self.memory_access_trace.len() > 0 {
 			self.memory_access_trace = vec![];
 		}
-		mmu_latency as u64
 	}
 
 	/// Updates addressing mode
@@ -134,7 +135,16 @@ impl Mmu {
 	/// # Arguments
 	/// * `mode`
 	pub fn update_privilege_mode(&mut self, mode: PrivilegeMode) {
-		println!("Warn: changing PRIVILEGE MODE to {}",match mode {PrivilegeMode::Machine=>"machine",PrivilegeMode::Supervisor=>"sup",PrivilegeMode::User=>"user",PrivilegeMode::Reserved=>"resev",_=>"panic"});
+		println!(
+			"Warn: changing PRIVILEGE MODE to {}",
+			match mode {
+				PrivilegeMode::Machine => "machine",
+				PrivilegeMode::Supervisor => "sup",
+				PrivilegeMode::User => "user",
+				PrivilegeMode::Reserved => "resev",
+				_ => "panic",
+			}
+		);
 		self.privilege_mode = mode;
 	}
 
@@ -330,8 +340,11 @@ impl Mmu {
 	/// * `cache_line` : target cache line
 	pub fn l1_refill(&mut self, index: u64, way: u64, cache_line: L1CacheLine) -> Result<(), ()> {
 		// Place the line
-		#[cfg(debug_assertions)]
-		println!("refill[{}][{}]: {:x?}", index, way, cache_line.data_blocks);
+		#[cfg(feature = "debug-cache")]
+		println!(
+			"refill L1[{}][{}]: {:x?}",
+			index, way, cache_line.data_blocks
+		);
 		self.l1_cache.data[index as usize].data[way as usize] = cache_line;
 		self.l1_cache.data[index as usize].data[way as usize].valid = true;
 		Ok(())
@@ -384,8 +397,27 @@ impl Mmu {
 			cycle: self.clock,
 		});
 
+		// Communicate with dramsim through pipe
+		// @TODO: Blocked
+		send_request(format!("{:016x} {} {}", write_back_address, "WRITE", self.clock).as_str());
+		#[cfg(feature = "debug-dramsim")]
+		println!(
+			"Send {:?}",
+			format!("{:016x} {} {}", write_back_address, "WRITE", self.clock)
+		);
+
+		let response_string = get_response();
+		#[cfg(feature = "debug-dramsim")]
+		println!("Resp {:?}", response_string);
+
 		// Latency for accessing memory
-		self.clock = self.clock.wrapping_add(L2_CACHE_MISS_LATENCY as u64);
+		self.clock = response_string
+			.split(" ")
+			.last()
+			.unwrap()
+			.parse::<u64>()
+			.unwrap();
+		// self.clock = self.clock.wrapping_add(L2_CACHE_MISS_LATENCY as u64);
 	}
 
 	/// Allocate a new L2 entry
@@ -426,8 +458,11 @@ impl Mmu {
 	/// * `cache_line` : target cache line
 	pub fn l2_refill(&mut self, index: u64, way: u64, cache_line: L2CacheLine) -> Result<(), ()> {
 		// Place the line
-		#[cfg(debug_assertions)]
-		println!("refill[{}][{}]: {:x?}", index, way, cache_line.data_blocks);
+		#[cfg(feature = "debug-cache")]
+		println!(
+			"refill L2[{}][{}]: {:x?}",
+			index, way, cache_line.data_blocks
+		);
 		self.l2_cache.data[index as usize].data[way as usize] = cache_line;
 		self.l2_cache.data[index as usize].data[way as usize].valid = true;
 		Ok(())
@@ -540,7 +575,7 @@ impl Mmu {
 
 						// Access memory for new line
 						//
-						#[cfg(debug_assertions)]
+						#[cfg(feature = "debug-cache")]
 						println!("refill from {:x}", p_address_aligned);
 						for i in 0..L1_CACHE_BLOCK_SIZE {
 							new_line.data_blocks[i as usize] =
@@ -554,8 +589,32 @@ impl Mmu {
 							cycle: self.clock,
 						});
 
+						// Communicate with dramsim through pipe
+						// @TODO: Blocked
+						send_request(
+							format!("{:016x} {} {}", p_address_aligned, "READ", self.clock)
+								.as_str(),
+						);
+						#[cfg(feature = "debug-dramsim")]
+						println!(
+							"Send {:?}",
+							format!("{:016x} {} {}", p_address_aligned, "READ", self.clock)
+						);
+
+						let response_string = get_response();
+						#[cfg(feature = "debug-dramsim")]
+						println!("Resp {:?}", response_string);
+
 						// Latency for accessing memory
-						self.clock = self.clock.wrapping_add(L2_CACHE_MISS_LATENCY as u64);
+						self.clock = response_string
+							.split(" ")
+							.last()
+							.unwrap()
+							.parse::<u64>()
+							.unwrap();
+
+						// // Latency for accessing memory
+						// self.clock = self.clock.wrapping_add(L2_CACHE_MISS_LATENCY as u64);
 
 						// Refill L2 with new line
 						match self.l2_refill(
@@ -620,8 +679,8 @@ impl Mmu {
 		match (v_address & 0xfff) <= (0x1000 - width) {
 			true => match self.translate_address(v_address, &MemoryAccessType::Read) {
 				Ok(p_address) => {
-					#[cfg(debug_assertions)]
-					println!("\nload {} @ 0x{:x}", width, p_address);
+					#[cfg(feature = "debug-cache")]
+					println!("\nload {}bytes @ 0x{:x}", width, p_address);
 
 					// pre-parse index
 					let l1_index: u64 =
@@ -722,8 +781,11 @@ impl Mmu {
 					// Store to cache
 					// @TODO: store buffer
 					// Get allocated cache line's way index
-					#[cfg(debug_assertions)]
-					println!("\nstore {} @ 0x{:x}", width, p_address);
+					#[cfg(feature = "debug-cache")]
+					println!(
+						"\nstore 0x{:x} of {}bytes @ 0x{:x}",
+						value, width, p_address
+					);
 
 					// pre-parse index
 					let l1_index: u64 =
@@ -990,12 +1052,12 @@ impl Mmu {
 		access_type: &MemoryAccessType,
 	) -> Result<u64, ()> {
 		let address = self.get_effective_address(v_address);
-		println!("detecter VADDR={}",address);
+		// println!("detecter VADDR={}", address);
 		let p_address = match self.addressing_mode {
 			AddressingMode::None => {
-				println!("AddressingMode==NONE");
+				// println!("AddressingMode==NONE");
 				Ok(address)
-			},
+			}
 			AddressingMode::SV32 => match self.privilege_mode {
 				// @TODO: Optimize
 				PrivilegeMode::Machine => match access_type {
@@ -1029,17 +1091,17 @@ impl Mmu {
 				// @TODO: Remove duplicated code with SV32
 				PrivilegeMode::Machine => match access_type {
 					MemoryAccessType::Execute => {
-						println!("AddressingMode=SV39 Machine Execute");
+						// println!("AddressingMode=SV39 Machine Execute");
 						Ok(address)
-					},
+					}
 					// @TODO: Remove magic number
 					_ => match (self.mstatus >> 17) & 1 {
 						0 => {
-							println!("AddressingMode=SV39 Machine else mstatus 17bit=1");
+							// println!("AddressingMode=SV39 Machine else mstatus 17bit=1");
 							Ok(address)
-						},
+						}
 						_ => {
-							println!("AddressingMode=SV39 Machine else mstatus 17bit!=1");
+							// println!("AddressingMode=SV39 Machine else mstatus 17bit!=1");
 							let privilege_mode = get_privilege_mode((self.mstatus >> 9) & 3);
 							match privilege_mode {
 								PrivilegeMode::Machine => Ok(address),
@@ -1060,7 +1122,7 @@ impl Mmu {
 						(address >> 21) & 0x1ff,
 						(address >> 30) & 0x1ff,
 					];
-					println!("AddressingMode=SV39 user");
+					// println!("AddressingMode=SV39 user");
 					self.tlb_or_pagewalk(address, 3 - 1, self.ppn, &vpns, &access_type)
 				}
 				_ => Ok(address),
@@ -1070,8 +1132,12 @@ impl Mmu {
 			}
 		};
 		match p_address {
-			Ok(address) => println!("detecter PADDR={}",p_address.unwrap()),
-			_=>{println!("ERROR: at translate_address paddr==err(())");}
+			Ok(address) => {
+				// println!("detecter PADDR={}", p_address.unwrap());
+			}
+			_ => {
+				println!("ERROR: at translate_address paddr==err(())");
+			}
 		}
 		p_address
 	}

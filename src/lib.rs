@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use std::str;
 
 pub mod cpu;
+pub mod dram;
 pub mod elf_analyzer;
 pub mod l1cache;
 pub mod l2cache;
@@ -83,7 +84,7 @@ impl Emulator {
 	/// * Added our print function.
 	pub fn run_program(&mut self, trace_memory_access: bool, trace_path: &str) {
 		loop {
-			#[cfg(debug_assertions)]
+			#[cfg(feature = "debug-disassemble")]
 			{
 				let disas = self.cpu.disassemble_next_instruction();
 				self.put_bytes_to_terminal(disas.as_bytes());
@@ -159,7 +160,7 @@ impl Emulator {
 	/// * `data` Program binary
 	// @TODO: Make ElfAnalyzer and move the core logic there.
 	// @TODO: Returns `Err` if the passed contend doesn't seem ELF file
-	pub fn setup_program(&mut self, data: Vec<u8>, memdump_contents:Vec<u8>) {
+	pub fn setup_program(&mut self, data: Vec<u8>, memdump_contents: Vec<u8>) {
 		let analyzer = ElfAnalyzer::new(data);
 
 		if !analyzer.validate() {
@@ -225,51 +226,52 @@ impl Emulator {
 		}
 		let mut iter_num = 0;
 		loop {
-			let mut left_addr : u64 = 0;
+			let mut left_addr: u64 = 0;
 			{
-				while memdump_contents[iter_num] != 'x' as u8{
+				while memdump_contents[iter_num] != 'x' as u8 {
 					iter_num = iter_num + 1;
 				}
-				for j in iter_num+1 .. memdump_contents.len() {
+				for j in iter_num + 1..memdump_contents.len() {
 					if memdump_contents[j] == 32 || memdump_contents[j] == 10 {
 						iter_num = j;
 						break;
 					} else {
 						let mut tmp = memdump_contents[j];
-						if memdump_contents[j] >= 'a' as u8 &&  memdump_contents[j] <= 'f' as u8 {
+						if memdump_contents[j] >= 'a' as u8 && memdump_contents[j] <= 'f' as u8 {
 							tmp = tmp - 'a' as u8 + 10 + 48;
-						} 
-						if memdump_contents[j] >= 'A' as u8 &&  memdump_contents[j] <= 'F' as u8 {
+						}
+						if memdump_contents[j] >= 'A' as u8 && memdump_contents[j] <= 'F' as u8 {
 							tmp = tmp - 'A' as u8 + 10 + 48;
-						} 
+						}
 						left_addr = left_addr * 16 + tmp as u64 - 48;
 					}
 				}
 			}
-			let mut right_value : u64 = 0;
+			let mut right_value: u64 = 0;
 			{
-				while memdump_contents[iter_num] != ' ' as u8{
+				while memdump_contents[iter_num] != ' ' as u8 {
 					iter_num = iter_num + 1;
 				}
-				for j in iter_num+1 .. memdump_contents.len() {
+				for j in iter_num + 1..memdump_contents.len() {
 					if memdump_contents[j] == 32 || memdump_contents[j] == 10 {
 						iter_num = j;
 						break;
 					} else {
 						let mut tmp = memdump_contents[j];
-						if memdump_contents[j] >= 'a' as u8 &&  memdump_contents[j] <= 'f' as u8 {
+						if memdump_contents[j] >= 'a' as u8 && memdump_contents[j] <= 'f' as u8 {
 							tmp = tmp - 'a' as u8 + 10 + 48;
-						} 
-						if memdump_contents[j] >= 'A' as u8 &&  memdump_contents[j] <= 'F' as u8 {
+						}
+						if memdump_contents[j] >= 'A' as u8 && memdump_contents[j] <= 'F' as u8 {
 							tmp = tmp - 'A' as u8 + 10 + 48;
-						} 
+						}
 						right_value = right_value * 16 + tmp as u64 - 48;
 					}
 				}
-
 			}
 			//println!("[debug log] commiting value {} to addr {}",right_value,left_addr);
-			self.cpu.get_mut_mmu().store_doubleword_raw(left_addr, right_value);
+			self.cpu
+				.get_mut_mmu()
+				.store_doubleword_raw(left_addr, right_value);
 			iter_num = iter_num + 1;
 			if iter_num >= memdump_contents.len() {
 				break;
