@@ -254,6 +254,8 @@ impl Cpu {
 		self.pc = value;
 	}
 
+	/// Updates GPR
+	/// # input gpr_name e.g. "sp", value e.g. 0x123456
 	pub fn update_gpr(&mut self, gpr_name: String, value: i64) {
 		for i in 0..31 {
 			if get_register_name(i) == gpr_name.as_str() {
