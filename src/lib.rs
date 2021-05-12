@@ -290,6 +290,7 @@ impl Emulator {
 		}
 		
 		self.cpu.write_csr(0x180, 0x8000000000080016); // write SATP
+		self.cpu.update_gpr(String::from("sp"), 0x7f7e9b50);
 		self.cpu.update_pc(header.e_entry);
 	}
 
