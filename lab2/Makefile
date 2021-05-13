@@ -22,7 +22,10 @@ run_phydump:
 	cargo run --release -- -m $(PHYDUMP_PATH) -i $(COREMARK_PATH)
 
 run_coremark:
-	cargo run --release -- -m $(PHYDUMP_PATH) -i $(COREMARK_PATH) -t $(TRACE_PATH)
+	# cargo run --release -- -m $(PHYDUMP_PATH) -i $(COREMARK_PATH) -t $(TRACE_PATH)
+	RUSTFLAGS="-L $(PROJ_DIR)/lab2/csrc" cargo build --release 
+	LD_LIBRARY_PATH="$(PROJ_DIR)/lab2/csrc" $(RELEASE_PATH)/lab2 -m $(SAMPLEDUMP_PATH) -i $(COREMARK_PATH) -t $(TRACE_PATH)
+
 
 run_dhrystone:
 	cargo run --release -- -i $(DHRYSTONE_PATH) 
@@ -34,5 +37,5 @@ run_add:
 cmodule = interface
 test:
 	$(MAKE) -C csrc $(cmodule)
-	RUSTFLAGS="-L $(PROJ_DIR)/lab2/csrc" cargo build --release
+	RUSTFLAGS="-L $(PROJ_DIR)/lab2/csrc" cargo build --release --features memdump
 	LD_LIBRARY_PATH="$(PROJ_DIR)/lab2/csrc" $(RELEASE_PATH)/lab2 -m $(SAMPLEDUMP_PATH) -i $(SAMPLE_PATH) -t $(TRACE_PATH)

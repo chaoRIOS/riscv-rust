@@ -47,6 +47,8 @@ pub static mut EMULATOR: Emulator = Emulator {
 		_dump_flag: false,
 		unsigned_data_mask: 0xffffffffffffffff,
 		tohost_addr: 0,
+
+		exit_signal: false,
 	},
 
 	symbol_map: None,

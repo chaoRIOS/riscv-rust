@@ -17,9 +17,13 @@ exclude = [
 members = [".", "lab1", "lab2"]
 
 [features]
+
+dramsim = []
+memdump = []
+
 debug = ["debug-cache", "debug-dramsim", "debug-disassemble", "debug-tohost"]
 debug-cache = []
-debug-dramsim = []
+debug-dramsim = ["dramsim"]
 debug-disassemble = []
 debug-tohost = []
 

@@ -85,6 +85,9 @@ pub struct Cpu {
 	pub _dump_flag: bool,
 	pub unsigned_data_mask: u64,
 	pub tohost_addr: u64,
+
+	// Exit signal
+	pub exit_signal: bool,
 }
 
 #[derive(Clone)]
@@ -102,11 +105,13 @@ pub enum PrivilegeMode {
 	Machine,
 }
 
+#[derive(Debug)]
 pub struct Trap {
 	pub trap_type: TrapType,
 	pub value: u64, // Trap type specific value
 }
 
+#[derive(Debug)]
 #[allow(dead_code)]
 pub enum TrapType {
 	InstructionAddressMisaligned,
@@ -242,6 +247,8 @@ impl Cpu {
 			_dump_flag: false,
 			unsigned_data_mask: 0xffffffffffffffff,
 			tohost_addr: 0,
+
+			exit_signal: false,
 		};
 		cpu.x[0xb] = 0x1020; // I don't know why but Linux boot seems to require this initialization
 		cpu.write_csr_raw(CSR_MISA_ADDRESS, 0x800000008014312f);
@@ -296,9 +303,15 @@ impl Cpu {
 			}
 			Err(e) => {
 				self.clock = self.mmu.clock;
+				println!("Handling exception {:?} at 0x{:x}", e.trap_type, e.value);
 				self.handle_exception(e, instruction_address);
 			}
 		}
+
+		if self.exit_signal == true {
+			return;
+		}
+
 		if trace_memory_access == true {
 			for i in 0..self.mmu.memory_access_trace.len() {
 				let mut file = OpenOptions::new().append(true).open(trace_path).unwrap();
@@ -360,7 +373,7 @@ impl Cpu {
 			}
 		};
 
-		match self.decode(word) {
+		match self.decode(word, instruction_address) {
 			Ok(inst) => {
 				let cycles = inst.cycles;
 				let _result = (inst.operation)(self, word, instruction_address);
@@ -396,7 +409,7 @@ impl Cpu {
 	/// [`Instruction`](struct.Instruction.html). Using [`DecodeCache`](struct.DecodeCache.html)
 	/// so if cache hits this method returns the result very quickly.
 	/// The result will be stored to cache.
-	pub fn decode(&mut self, word: u32) -> Result<&Instruction, ()> {
+	pub fn decode(&mut self, word: u32, instruction_address: u64) -> Result<&Instruction, ()> {
 		match self.decode_and_get_instruction_index(word) {
 			Ok(index) => {
 				// Handle to/from host
@@ -404,61 +417,22 @@ impl Cpu {
 				match inst.name {
 					"SD" | "SW" | "SH" | "SB" => {
 						let f = parse_format_s(word);
-						#[cfg(feature = "debug-tohost")]
-						println!(
-							"[Tohost] {} {:x} to {:x}",
-							inst.name,
-							self.x[f.rs2],
-							self.x[f.rs1].wrapping_add(f.imm)
-						);
 						if self.x[f.rs1].wrapping_add(f.imm) == (self.tohost_addr as i64) {
+							#[cfg(feature = "debug-tohost")]
+							println!(
+								"[Tohost] {} {:x} to {:x}",
+								inst.name,
+								self.x[f.rs2],
+								self.x[f.rs1].wrapping_add(f.imm)
+							);
 							let tohost_addr = self.tohost_addr;
 							let tohost_data_addr = self.x[f.rs2];
 							match tohost_data_addr {
 								0..=0x80000000 => {
-									// Exit
+									// Exit for riscv-test on tohost getting 1/0
 									//
-									println!(
-										"Latency = {} cycles",
-										self.read_csr_raw(CSR_MCYCLE_ADDRESS)
-									);
-									// L1 Cache hit/miss
-									let l1_hit_num = self.read_csr_raw(CSR_HPMCOUNTER3_ADDRESS);
-									let l1_miss_num = self.read_csr_raw(CSR_HPMCOUNTER4_ADDRESS);
-									// L2 Cache hit/miss
-									let _l2_hit_num = self.read_csr_raw(CSR_HPMCOUNTER5_ADDRESS);
-									let l2_miss_num = self.read_csr_raw(CSR_HPMCOUNTER6_ADDRESS);
-									// // MAT
-									// let memory_access_time =
-									// 	self.read_csr_raw(CSR_HPMCOUNTER7_ADDRESS);
-									println!(
-										"Cache Hit rate = {}%",
-										100f32
-											* (1f32
-												- (l2_miss_num as f32
-													/ (l1_hit_num + l1_miss_num) as f32))
-									);
-									println!(
-										"Cache Miss rate = {}%",
-										((l2_miss_num * 100) as f32
-											/ (l1_hit_num + l1_miss_num) as f32) as f32
-									);
-
-									// // AMAT
-									// println!(
-									// 	"Cache Hit Latency = {} cycles",
-									// 	memory_access_time / (l1_hit_num + l1_miss_num)
-									// );
-
-									// Average hit latency
-									println!(
-										"Cache Hit Latency = {} cycles",
-										(l1_hit_num as f32 * L1_CACHE_HIT_LATENCY as f32
-											+ l1_miss_num as f32 * L2_CACHE_HIT_LATENCY as f32)
-											/ (l1_hit_num as f32 + l1_miss_num as f32)
-									);
-
-									process::exit(0);
+									// @TODO: Add pass of fail printing
+									self.exit_signal = true;
 								}
 								_ => {
 									// Tohost I/O stream
@@ -490,8 +464,29 @@ impl Cpu {
 									// Note: host needs to access cache instead of memory!
 									self.get_mut_mmu().store_word_raw(tohost_addr + 0x40, 1);
 									self.get_mut_mmu().store_word_raw(tohost_addr, 0);
+
+									// Exit after print to host
+									//
+									// @TODO: verify
+									self.exit_signal = true;
 								}
 							};
+						}
+					}
+					"JAL" => {
+						// Exit on iterative JAL
+						//
+						// @TODO: Add error exit status
+						let f = parse_format_j(word);
+						println!(
+							"self.pc:0x{:x} inst.add:0x{:x} imm:0x{:x} add+imm:0x{:x}",
+							self.pc,
+							instruction_address,
+							f.imm,
+							instruction_address + f.imm
+						);
+						if instruction_address + f.imm == instruction_address {
+							self.exit_signal = true;
 						}
 					}
 					_ => {}
@@ -1550,6 +1545,12 @@ impl Cpu {
 		};
 
 		let mut s = format!("PC:{:016x} ", self.unsigned_data(self.pc as i64));
+		match self.pc {
+			0x00010298u64 | 0x0001029au64 | 0x0001029cu64 | 0x0001029eu64 => {
+				return String::from("");
+			}
+			_ => {}
+		}
 		s += &format!("{:08x} ", original_word);
 		s += &format!("{} ", inst.name);
 		s += &format!("{}", (inst.disassemble)(self, word, self.pc, true));

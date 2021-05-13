@@ -397,27 +397,32 @@ impl Mmu {
 			cycle: self.clock,
 		});
 
-		// Communicate with dramsim through pipe
-		// @TODO: Blocked
-		send_request(format!("{:016x} {} {}", write_back_address, "WRITE", self.clock).as_str());
-		#[cfg(feature = "debug-dramsim")]
-		println!(
-			"Send {:?}",
-			format!("{:016x} {} {}", write_back_address, "WRITE", self.clock)
-		);
+		if cfg!(feature = "dramsim") {
+			// Communicate with dramsim through pipe
+			// @TODO: Blocked
+			send_request(
+				format!("{:016x} {} {}", write_back_address, "WRITE", self.clock).as_str(),
+			);
+			#[cfg(feature = "debug-dramsim")]
+			println!(
+				"Send {:?}",
+				format!("{:016x} {} {}", write_back_address, "WRITE", self.clock)
+			);
 
-		let response_string = get_response();
-		#[cfg(feature = "debug-dramsim")]
-		println!("Resp {:?}", response_string);
+			let response_string = get_response();
+			#[cfg(feature = "debug-dramsim")]
+			println!("Resp {:?}", response_string);
 
-		// Latency for accessing memory
-		self.clock = response_string
-			.split(" ")
-			.last()
-			.unwrap()
-			.parse::<u64>()
-			.unwrap();
-		// self.clock = self.clock.wrapping_add(L2_CACHE_MISS_LATENCY as u64);
+			// Latency for accessing memory
+			self.clock = response_string
+				.split(" ")
+				.last()
+				.unwrap()
+				.parse::<u64>()
+				.unwrap();
+		} else {
+			self.clock = self.clock.wrapping_add(L2_CACHE_MISS_LATENCY as u64);
+		}
 	}
 
 	/// Allocate a new L2 entry
@@ -589,32 +594,34 @@ impl Mmu {
 							cycle: self.clock,
 						});
 
-						// Communicate with dramsim through pipe
-						// @TODO: Blocked
-						send_request(
-							format!("{:016x} {} {}", p_address_aligned, "READ", self.clock)
-								.as_str(),
-						);
-						#[cfg(feature = "debug-dramsim")]
-						println!(
-							"Send {:?}",
-							format!("{:016x} {} {}", p_address_aligned, "READ", self.clock)
-						);
+						if cfg!(feature = "dramsim") {
+							// Communicate with dramsim through pipe
+							// @TODO: Blocked
+							send_request(
+								format!("{:016x} {} {}", p_address_aligned, "READ", self.clock)
+									.as_str(),
+							);
+							#[cfg(feature = "debug-dramsim")]
+							println!(
+								"Send {:?}",
+								format!("{:016x} {} {}", p_address_aligned, "READ", self.clock)
+							);
 
-						let response_string = get_response();
-						#[cfg(feature = "debug-dramsim")]
-						println!("Resp {:?}", response_string);
+							let response_string = get_response();
+							#[cfg(feature = "debug-dramsim")]
+							println!("Resp {:?}", response_string);
 
-						// Latency for accessing memory
-						self.clock = response_string
-							.split(" ")
-							.last()
-							.unwrap()
-							.parse::<u64>()
-							.unwrap();
-
-						// // Latency for accessing memory
-						// self.clock = self.clock.wrapping_add(L2_CACHE_MISS_LATENCY as u64);
+							// Latency for accessing memory
+							self.clock = response_string
+								.split(" ")
+								.last()
+								.unwrap()
+								.parse::<u64>()
+								.unwrap();
+						} else {
+							// Latency for accessing memory
+							self.clock = self.clock.wrapping_add(L2_CACHE_MISS_LATENCY as u64);
+						}
 
 						// Refill L2 with new line
 						match self.l2_refill(

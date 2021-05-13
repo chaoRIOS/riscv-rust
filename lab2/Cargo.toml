@@ -8,5 +8,16 @@ edition = "2018"
 
 [dependencies]
 getopts = "0.2"
-riscv_emu_rust = {path = "../", features = ["debug"]}
+riscv_emu_rust = {path = "../" ,default-features = false, optional = true}
 lab1 = {path = "../lab1"}
+
+[features]
+default = ["riscv_emu_rust"]
+dramsim = ["riscv_emu_rust","riscv_emu_rust/dramsim"]
+memdump = ["riscv_emu_rust","riscv_emu_rust/memdump"]
+
+debug = ["debug-cache", "debug-dramsim", "debug-disassemble", "debug-tohost"]
+debug-cache = ["riscv_emu_rust","riscv_emu_rust/debug-cache"]
+debug-dramsim = ["dramsim","riscv_emu_rust","riscv_emu_rust/debug-dramsim"]
+debug-disassemble = ["riscv_emu_rust","riscv_emu_rust/debug-disassemble"]
+debug-tohost = ["riscv_emu_rust","riscv_emu_rust/debug-tohost"]

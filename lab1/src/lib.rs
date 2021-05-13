@@ -72,7 +72,7 @@ pub unsafe extern "C" fn dpi_fetch_decode(
 			Err(_) => panic!("Failed to read ELF"),
 		};
 		let mut memdump_contents = vec![];
-		EMULATOR.setup_program(elf_contents,memdump_contents);
+		EMULATOR.setup_program(elf_contents, memdump_contents);
 	}
 
 	// Check input signals
@@ -130,7 +130,7 @@ pub unsafe extern "C" fn dpi_fetch_decode(
 	};
 
 	// Decoding
-	let instruction = match EMULATOR.cpu.decode(word) {
+	let instruction = match EMULATOR.cpu.decode(word, instruction_address) {
 		Ok(inst) => inst,
 		Err(()) => {
 			// panic!(
@@ -576,7 +576,9 @@ pub unsafe extern "C" fn dpi_issue_execute_writeback(
 			};
 
 			// Decoding
-			let instruction = match EMULATOR.cpu.decode(word) {
+
+			// @TODO: fix decode params
+			let instruction = match EMULATOR.cpu.decode(word, 0) {
 				Ok(inst) => inst,
 				Err(()) => {
 					panic!(

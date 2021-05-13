@@ -23,16 +23,22 @@ fn run_elf(
 	trace_memory_access: bool,
 	mem_dump: &str,
 ) -> std::io::Result<()> {
-	let mut memdump_file = File::open(mem_dump)?;
 	let mut memdump_contents = vec![];
-	memdump_file.read_to_end(&mut memdump_contents)?;
+	#[cfg(feature = "memdump")]
+	{
+		let mut memdump_file = File::open(mem_dump)?;
+		memdump_file.read_to_end(&mut memdump_contents)?;
+	}
 	let mut elf_file = File::open(input_path)?;
 	let mut elf_contents = vec![];
 	elf_file.read_to_end(&mut elf_contents)?;
-	setup_pipe(
-		"/home/cwang/work/riscv-rust/lab2/rqst_to_memory",
-		"/home/cwang/work/riscv-rust/lab2/resp_to_cpu",
-	);
+	#[cfg(feature = "dramsim")]
+	{
+		setup_pipe(
+			"/home/cwang/work/riscv-rust/lab2/rqst_to_memory",
+			"/home/cwang/work/riscv-rust/lab2/resp_to_cpu",
+		);
+	}
 	unsafe {
 		EMULATOR.setup_program(elf_contents, memdump_contents);
 		EMULATOR.update_xlen(Xlen::Bit64);
