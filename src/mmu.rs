@@ -3,7 +3,7 @@
 pub const DRAM_BASE: u64 = 0x80000000;
 
 /// @TODO: (dev)Enable TLB
-const ENABLE_TLB: bool = false;
+const ENABLE_TLB: bool = true;
 
 extern crate fnv;
 
@@ -1194,10 +1194,7 @@ impl Mmu {
 	fn tlb_get_entry(&mut self, vpns: u64) -> u64 {
 		let i: usize = self.tlb_entry_search(vpns);
 		self.tlb_bitnum_increased(i);
-		println!(
-			"tlb_get_entry: id={},tag[id]={},value[id]={}",
-			i, self.tlb_tag[i], self.tlb_value[i]
-		);
+		//println!("tlb_get_entry: id={},tag[id]={},value[id]={}",i,self.tlb_tag[i],self.tlb_value[i]);
 		self.tlb_value[i]
 	}
 
@@ -1210,10 +1207,7 @@ impl Mmu {
 					// found free entry
 					self.tlb_tag[j] = vpns | 1;
 					self.tlb_value[j] = new_pte;
-					println!(
-						"tlb_update_entry: id={},tag[id]={},value[id]={}",
-						j, self.tlb_tag[j], self.tlb_value[j]
-					);
+					//println!("tlb_update_entry: id={},tag[id]={},value[id]={}",j,self.tlb_tag[j],self.tlb_value[j]);
 					self.tlb_bitnum_increased(j);
 					return;
 				}
@@ -1224,11 +1218,9 @@ impl Mmu {
 					// found victim, swap it
 					self.tlb_tag[j] = vpns | 1;
 					self.tlb_value[j] = new_pte;
-					println!(
-						"tlb_update_entry: id={},tag[id]={},value[id]={}",
-						j, self.tlb_tag[j], self.tlb_value[j]
-					);
+					//println!("tlb_update_entry: id={},tag[id]={},value[id]={}",j,self.tlb_tag[j],self.tlb_value[j]);
 					self.tlb_bitnum_increased(j);
+					return;
 				}
 			}
 			// no victim
@@ -1242,7 +1234,7 @@ impl Mmu {
 	fn tlb_or_pagewalk(
 		&mut self,
 		v_address: u64,
-		level: u8,
+		mut level: u8,
 		parent_ppn: u64,
 		vpns: &[u64],
 		access_type: &MemoryAccessType,
@@ -1260,7 +1252,11 @@ impl Mmu {
 		} as u64;
 		let pte = match self.addressing_mode {
 			AddressingMode::SV32 => match self.tlb_entry_avaliable(vpn) {
-				true => self.tlb_get_entry(vpn),
+				true => {
+					let tmp = self.tlb_get_entry(vpn);
+					level = (tmp >> 60) as u8;
+					tmp
+				},
 				_ => {
 					let tmp = self.load_word_raw(pte_address) as u64;
 					let tmp_x = (tmp >> 3) & 1;
@@ -1268,7 +1264,7 @@ impl Mmu {
 					let tmp_r = (tmp >> 1) & 1;
 					if tmp_x != 0 || tmp_r != 0 || tmp_w != 0 {
 						// a leaf PTE
-						self.tlb_update_entry(vpn, tmp);
+						self.tlb_update_entry(vpn, tmp | ((level as u64) << 60));
 					}
 					tmp
 				}
@@ -1276,14 +1272,18 @@ impl Mmu {
 			_ => {
 				if ENABLE_TLB == true {
 					match self.tlb_entry_avaliable(vpn) {
-						true => self.tlb_get_entry(vpn),
+						true => {
+							let tmp = self.tlb_get_entry(vpn);
+							level = (tmp >> 60) as u8;
+							tmp
+						},
 						_ => {
 							let tmp = self.load_doubleword_raw(pte_address);
 							let tmp_x = (tmp >> 3) & 1;
 							let tmp_w = (tmp >> 2) & 1;
 							let tmp_r = (tmp >> 1) & 1;
 							if tmp_x != 0 || tmp_r != 0 || tmp_w != 0 {
-								self.tlb_update_entry(vpn, tmp);
+								self.tlb_update_entry(vpn, tmp | ((level as u64) << 60));
 							}
 							tmp
 						}
@@ -1315,7 +1315,7 @@ impl Mmu {
 		let w = (pte >> 2) & 1;
 		let r = (pte >> 1) & 1;
 		let v = pte & 1;
-
+		
 		// println!("VA:{:X} Level:{:X} PTE_AD:{:X} PTE:{:X} PPPN:{:X} PPN:{:X} PPN1:{:X} PPN0:{:X}", v_address, level, pte_address, pte, parent_ppn, ppn, ppns[1], ppns[0]);
 
 		if v == 0 || (r == 0 && w == 1) {

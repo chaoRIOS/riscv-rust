@@ -1,12 +1,8 @@
 extern crate fnv;
 
+use mmu::{AddressingMode, MemoryAccessType, Mmu};
 use std::fs::OpenOptions;
 use std::io::prelude::*;
-use std::process;
-
-use l1cache::L1_CACHE_HIT_LATENCY;
-use l2cache::L2_CACHE_HIT_LATENCY;
-use mmu::{AddressingMode, MemoryAccessType, Mmu};
 
 pub const CSR_CAPACITY: usize = 4096;
 
@@ -263,6 +259,18 @@ impl Cpu {
 		self.pc = value;
 	}
 
+	/// Updates GPR
+	/// # input gpr_name e.g. "sp", value e.g. 0x123456
+	pub fn update_gpr(&mut self, gpr_name: String, value: i64) {
+		for i in 0..31 {
+			if get_register_name(i) == gpr_name.as_str() {
+				self.x[i] = value;
+				println!("updating gpr {} (x[{}]) to {}", gpr_name.as_str(), i, value);
+				return;
+			}
+		}
+	}
+
 	/// Updates XLEN, 32-bit or 64-bit
 	///
 	/// # Arguments
@@ -372,9 +380,11 @@ impl Cpu {
 				self.uncompress(original_word & 0xffff)
 			}
 		};
+		println!("disass: {}", self.disassemble_next_instruction());
 
 		match self.decode(word, instruction_address) {
 			Ok(inst) => {
+				println!("inst={},pc={}", inst.get_name(), instruction_address);
 				let cycles = inst.cycles;
 				let _result = (inst.operation)(self, word, instruction_address);
 				self.x[0] = 0; // hardwired zero
@@ -402,7 +412,6 @@ impl Cpu {
 				// );
 			}
 		};
-		Ok(0)
 	}
 
 	/// Decodes a word instruction data and returns a reference to
