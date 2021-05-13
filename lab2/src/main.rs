@@ -44,7 +44,10 @@ fn run_elf(
 		EMULATOR.update_xlen(Xlen::Bit64);
 		EMULATOR.run_program(trace_memory_access, trace_path);
 	}
-	terminate_pipe();
+	#[cfg(feature = "dramsim")]
+	{
+		terminate_pipe();
+	}
 	Ok(())
 }
 

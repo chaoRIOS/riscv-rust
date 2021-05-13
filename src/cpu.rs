@@ -265,7 +265,7 @@ impl Cpu {
 		for i in 0..31 {
 			if get_register_name(i) == gpr_name.as_str() {
 				self.x[i] = value;
-				println!("updating gpr {} (x[{}]) to {}", gpr_name.as_str(), i, value);
+				// println!("updating gpr {} (x[{}]) to {}", gpr_name.as_str(), i, value);
 				return;
 			}
 		}
@@ -380,11 +380,11 @@ impl Cpu {
 				self.uncompress(original_word & 0xffff)
 			}
 		};
-		println!("disass: {}", self.disassemble_next_instruction());
+		// println!("disass: {}", self.disassemble_next_instruction());
 
 		match self.decode(word, instruction_address) {
 			Ok(inst) => {
-				println!("inst={},pc={}", inst.get_name(), instruction_address);
+				// println!("inst={},pc={}", inst.get_name(), instruction_address);
 				let cycles = inst.cycles;
 				let _result = (inst.operation)(self, word, instruction_address);
 				self.x[0] = 0; // hardwired zero
@@ -487,16 +487,19 @@ impl Cpu {
 						//
 						// @TODO: Add error exit status
 						let f = parse_format_j(word);
-						println!(
-							"self.pc:0x{:x} inst.add:0x{:x} imm:0x{:x} add+imm:0x{:x}",
-							self.pc,
-							instruction_address,
-							f.imm,
-							instruction_address + f.imm
-						);
+						// println!(
+						// 	"[{}] inst.add:0x{:x} imm:0x{:x} add+imm:0x{:x}",
+						// 	self.clock,
+						// 	instruction_address,
+						// 	f.imm,
+						// 	instruction_address + f.imm
+						// );
 						if instruction_address + f.imm == instruction_address {
 							self.exit_signal = true;
 						}
+					}
+					"ECALL" => {
+						self.exit_signal = true;
 					}
 					_ => {}
 				}

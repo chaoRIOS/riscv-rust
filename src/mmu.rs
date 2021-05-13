@@ -1256,7 +1256,7 @@ impl Mmu {
 					let tmp = self.tlb_get_entry(vpn);
 					level = (tmp >> 60) as u8;
 					tmp
-				},
+				}
 				_ => {
 					let tmp = self.load_word_raw(pte_address) as u64;
 					let tmp_x = (tmp >> 3) & 1;
@@ -1276,7 +1276,7 @@ impl Mmu {
 							let tmp = self.tlb_get_entry(vpn);
 							level = (tmp >> 60) as u8;
 							tmp
-						},
+						}
 						_ => {
 							let tmp = self.load_doubleword_raw(pte_address);
 							let tmp_x = (tmp >> 3) & 1;
@@ -1315,7 +1315,6 @@ impl Mmu {
 		let w = (pte >> 2) & 1;
 		let r = (pte >> 1) & 1;
 		let v = pte & 1;
-		
 		// println!("VA:{:X} Level:{:X} PTE_AD:{:X} PTE:{:X} PPPN:{:X} PPN:{:X} PPN1:{:X} PPN0:{:X}", v_address, level, pte_address, pte, parent_ppn, ppn, ppns[1], ppns[0]);
 
 		if v == 0 || (r == 0 && w == 1) {

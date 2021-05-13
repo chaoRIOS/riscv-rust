@@ -351,7 +351,7 @@ impl Emulator {
 		#[cfg(feature = "memdump")]
 		{
 			// write SATP
-			self.cpu.write_csr_raw(0x180, 0x8000000000080016);
+			self.cpu.write_csr(0x180, 0x8000000000080016);
 			// write sp
 			self.cpu.update_gpr(String::from("sp"), 0x7f7e9b50);
 		}
