@@ -22,9 +22,9 @@ run_phydump:
 	cargo run --release -- -m $(PHYDUMP_PATH) -i $(COREMARK_PATH)
 
 run_coremark:
-	# cargo run --release -- -m $(PHYDUMP_PATH) -i $(COREMARK_PATH) -t $(TRACE_PATH)
-	RUSTFLAGS="-L $(PROJ_DIR)/lab2/csrc" cargo build --release 
-	LD_LIBRARY_PATH="$(PROJ_DIR)/lab2/csrc" $(RELEASE_PATH)/lab2 -m $(SAMPLEDUMP_PATH) -i $(COREMARK_PATH) -t $(TRACE_PATH)
+	cargo run --release --features debug-disassemble -- -m $(PHYDUMP_PATH) -i $(COREMARK_PATH)
+	# RUSTFLAGS="-L $(PROJ_DIR)/lab2/csrc" cargo build --release 
+	# LD_LIBRARY_PATH="$(PROJ_DIR)/lab2/csrc" $(RELEASE_PATH)/lab2 -m $(SAMPLEDUMP_PATH) -i $(COREMARK_PATH) -t $(TRACE_PATH)
 
 
 run_dhrystone:

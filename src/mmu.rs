@@ -8,6 +8,7 @@ const ENABLE_TLB: bool = true;
 extern crate fnv;
 
 use cpu::{get_privilege_mode, PrivilegeMode, Trap, TrapType, Xlen};
+#[cfg(feature = "dramsim")]
 use dram::*;
 use l1cache::*;
 use l2cache::*;
@@ -247,6 +248,7 @@ impl Mmu {
 	/// * `v_address` Virtual address
 	pub fn fetch_word(&mut self, v_address: u64) -> Result<u32, Trap> {
 		let width = 4;
+		println!("fetching {:x}", v_address);
 		match (v_address & 0xfff) <= (0x1000 - width) {
 			true => {
 				// Fast path. All bytes fetched are in the same page so
@@ -397,7 +399,8 @@ impl Mmu {
 			cycle: self.clock,
 		});
 
-		if cfg!(feature = "dramsim") {
+		#[cfg(feature = "dramsim")]
+		{
 			// Communicate with dramsim through pipe
 			// @TODO: Blocked
 			send_request(
@@ -420,7 +423,9 @@ impl Mmu {
 				.unwrap()
 				.parse::<u64>()
 				.unwrap();
-		} else {
+		}
+		#[cfg(not(feature = "dramsim"))]
+		{
 			self.clock = self.clock.wrapping_add(L2_CACHE_MISS_LATENCY as u64);
 		}
 	}
@@ -594,7 +599,8 @@ impl Mmu {
 							cycle: self.clock,
 						});
 
-						if cfg!(feature = "dramsim") {
+						#[cfg(feature = "dramsim")]
+						{
 							// Communicate with dramsim through pipe
 							// @TODO: Blocked
 							send_request(
@@ -618,7 +624,9 @@ impl Mmu {
 								.unwrap()
 								.parse::<u64>()
 								.unwrap();
-						} else {
+						}
+						#[cfg(not(feature = "dramsim"))]
+						{
 							// Latency for accessing memory
 							self.clock = self.clock.wrapping_add(L2_CACHE_MISS_LATENCY as u64);
 						}

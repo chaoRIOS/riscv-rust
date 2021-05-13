@@ -11,6 +11,7 @@ use std::process;
 use std::str;
 
 pub mod cpu;
+#[cfg(feature = "dramsim")]
 pub mod dram;
 pub mod elf_analyzer;
 pub mod l1cache;

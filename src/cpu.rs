@@ -304,20 +304,60 @@ impl Cpu {
 	/// Runs program one cycle. Fetch, decode, and execution are completed in a cycle so far.
 	pub fn tick(&mut self, trace_memory_access: bool, trace_path: &str) {
 		let instruction_address = self.pc;
-		match self.tick_operate() {
-			Ok(pipeline_latency) => {
-				self.mmu.clock = self.mmu.clock.wrapping_add(pipeline_latency);
+
+		if self.wfi {
+			if (self.read_csr_raw(CSR_MIE_ADDRESS) & self.read_csr_raw(CSR_MIP_ADDRESS)) != 0 {
+				self.wfi = false;
+			}
+			// @TODO: determine WFI latency
+			return;
+		}
+
+		let word = match self.fetch_uncompress() {
+			Ok(word) => word,
+			Err(e) => {
+				// Handle instruction page fault
+				self.handle_exception(e, instruction_address);
+				// @TODO: fix
+				// e.g. add fetch latency
+				return;
+			}
+		};
+
+		let decode_result = self.decode(word, instruction_address);
+
+		// Extra exit after decode stage, because we handle to/from host operation in decode stage.
+		// Currently detect as exit when
+		// * tohost address is set
+		// * JAL to the identical address
+		// * ECALL
+		let pipeline_result = match decode_result {
+			Ok(inst) => {
+				// println!("inst={},pc={}", inst.get_name(), instruction_address);
+				let cycles = inst.cycles;
+				let result = (inst.operation)(self, word, instruction_address);
+				self.x[0] = 0; // hardwired zero
+
+				(result, cycles)
+			}
+			Err(()) => {
+				// @TODO: illegal instructions
+				//
+				// Currently used for exitting.
+				return;
+			}
+		};
+
+		match pipeline_result.0 {
+			Ok(()) => {
+				self.mmu.clock = self.mmu.clock.wrapping_add(pipeline_result.1 as u64);
 				self.clock = self.mmu.clock;
 			}
 			Err(e) => {
+				// Handle pipeline traps
 				self.clock = self.mmu.clock;
-				println!("Handling exception {:?} at 0x{:x}", e.trap_type, e.value);
 				self.handle_exception(e, instruction_address);
 			}
-		}
-
-		if self.exit_signal == true {
-			return;
 		}
 
 		if trace_memory_access == true {
@@ -356,20 +396,19 @@ impl Cpu {
 	}
 
 	// @TODO: Rename?
-	fn tick_operate(&mut self) -> Result<u64, Trap> {
-		if self.wfi {
-			if (self.read_csr_raw(CSR_MIE_ADDRESS) & self.read_csr_raw(CSR_MIP_ADDRESS)) != 0 {
-				self.wfi = false;
-			}
-			// @TODO: determine WFI latency
-			return Ok(1);
-		}
+	fn fetch_uncompress(&mut self) -> Result<u32, Trap> {
+		// if self.wfi {
+		// 	if (self.read_csr_raw(CSR_MIE_ADDRESS) & self.read_csr_raw(CSR_MIP_ADDRESS)) != 0 {
+		// 		self.wfi = false;
+		// 	}
+		// 	// @TODO: determine WFI latency
+		// 	return Ok(1);
+		// }
 
 		let original_word = match self.fetch() {
 			Ok(word) => word,
 			Err(e) => return Err(e),
 		};
-		let instruction_address = self.pc;
 		let word = match (original_word & 0x3) == 0x3 {
 			true => {
 				self.pc = self.pc.wrapping_add(4); // 32-bit length non-compressed instruction
@@ -380,38 +419,9 @@ impl Cpu {
 				self.uncompress(original_word & 0xffff)
 			}
 		};
+
+		Ok(word)
 		// println!("disass: {}", self.disassemble_next_instruction());
-
-		match self.decode(word, instruction_address) {
-			Ok(inst) => {
-				// println!("inst={},pc={}", inst.get_name(), instruction_address);
-				let cycles = inst.cycles;
-				let _result = (inst.operation)(self, word, instruction_address);
-				self.x[0] = 0; // hardwired zero
-
-				// @TODO: why can't borrow result?
-				return Ok(cycles as u64);
-				// match result {
-				// 	Ok(()) => {
-				// 		return Ok(inst.cycles as u64);
-				// 	}
-				// 	Err(e) => {
-				// 		return Err(e);
-				// 	}
-				// }
-			}
-			Err(()) => {
-				// @TODO: illegal instructions
-				return Err(Trap {
-					trap_type: TrapType::IllegalInstruction,
-					value: self.pc,
-				});
-				// panic!(
-				// 	"Unknown instruction PC:{:x} WORD:{:x}",
-				// 	instruction_address, original_word
-				// );
-			}
-		};
 	}
 
 	/// Decodes a word instruction data and returns a reference to
@@ -442,6 +452,7 @@ impl Cpu {
 									//
 									// @TODO: Add pass of fail printing
 									self.exit_signal = true;
+									return Err(());
 								}
 								_ => {
 									// Tohost I/O stream
@@ -478,6 +489,7 @@ impl Cpu {
 									//
 									// @TODO: verify
 									self.exit_signal = true;
+									return Err(());
 								}
 							};
 						}
@@ -496,10 +508,12 @@ impl Cpu {
 						// );
 						if instruction_address + f.imm == instruction_address {
 							self.exit_signal = true;
+							return Err(());
 						}
 					}
 					"ECALL" => {
 						self.exit_signal = true;
+						return Err(());
 					}
 					_ => {}
 				}
@@ -881,11 +895,14 @@ impl Cpu {
 	}
 
 	pub fn write_csr(&mut self, address: u16, value: u64) -> Result<(), Trap> {
-		if address == CSR_SATP_ADDRESS {
-			// tempoary for lab2
-			println!("Warn: Changing SATP to {}", value);
-			self.update_addressing_mode(value);
-			return Ok(());
+		#[cfg(feature = "memdump")]
+		{
+			if address == CSR_SATP_ADDRESS {
+				// tempoary for lab2
+				println!("Warn: Changing SATP to {}", value);
+				self.update_addressing_mode(value);
+				return Ok(());
+			}
 		}
 		match self.has_csr_access_privilege(address) {
 			true => {

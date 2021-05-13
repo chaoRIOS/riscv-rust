@@ -5,10 +5,9 @@ extern crate riscv_emu_rust;
 
 extern crate lab1;
 
-use riscv_emu_rust::{
-	cpu::Xlen,
-	dram::{setup_pipe, terminate_pipe},
-};
+use riscv_emu_rust::cpu::Xlen;
+#[cfg(feature = "dramsim")]
+use riscv_emu_rust::dram::{setup_pipe, terminate_pipe};
 
 use getopts::Options;
 use std::env;
