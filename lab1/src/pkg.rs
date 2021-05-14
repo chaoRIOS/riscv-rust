@@ -41,6 +41,8 @@ pub static mut EMULATOR: Emulator = Emulator {
 			tlb_tag: [0; TLB_ENTRY_NUM],
 			tlb_value: [0; TLB_ENTRY_NUM],
 			tlb_bitnum: 0,
+
+			dram_latency: 0,
 		},
 		reservation: 0,
 		is_reservation_set: false,
@@ -59,6 +61,8 @@ pub static mut EMULATOR: Emulator = Emulator {
 	// These can be updated in setup_program()
 	is_test: false,
 	tohost_addr: 0,
+
+	run_time: 0.0,
 };
 
 pub const COSIM_INSTRUCTIONS: [&'static str; 75] = [

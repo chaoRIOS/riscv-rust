@@ -9,6 +9,8 @@ DHRYSTONE_PATH = /home/zfu/rios/apd_from_lab1/apd/tb/test_program/benchmarks/dhr
 PHYDUMP_PATH = $(PROJ_DIR)/lab2/phydump.txt
 RV64UI_PATH =$(PROJ_DIR)/lab2/rv64ui-v-add
 TRACE_PATH = $(PROJ_DIR)/lab2/trace.dump
+REQ_PIPE = $(PROJ_DIR)/lab2/rqst_to_memory
+RESP_PIPE = $(PROJ_DIR)/lab2/resp_to_cpu
 SAMPLEDUMP_PATH=$(PROJ_DIR)/lab2/stream.txt
 SAMPLE_PATH=/$(PROJ_DIR)/lab2/stream.o
 
@@ -37,5 +39,5 @@ run_add:
 cmodule = interface
 test:
 	$(MAKE) -C csrc $(cmodule)
-	RUSTFLAGS="-L $(PROJ_DIR)/lab2/csrc" cargo build --release --features memdump
-	LD_LIBRARY_PATH="$(PROJ_DIR)/lab2/csrc" $(RELEASE_PATH)/lab2 -m $(SAMPLEDUMP_PATH) -i $(SAMPLE_PATH) -t $(TRACE_PATH)
+	RUSTFLAGS="-L $(PROJ_DIR)/lab2/csrc" cargo build --release --features memdump,dramsim
+	LD_LIBRARY_PATH="$(PROJ_DIR)/lab2/csrc" $(RELEASE_PATH)/lab2 -m $(SAMPLEDUMP_PATH) -i $(SAMPLE_PATH) -t $(REQ_PIPE) -T $(RESP_PIPE)

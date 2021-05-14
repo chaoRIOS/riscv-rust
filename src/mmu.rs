@@ -40,6 +40,8 @@ pub struct Mmu {
 	pub tlb_tag: [u64; TLB_ENTRY_NUM],
 	pub tlb_value: [u64; TLB_ENTRY_NUM],
 	pub tlb_bitnum: usize,
+
+	pub dram_latency: u64,
 }
 
 #[derive(Debug)]
@@ -94,6 +96,8 @@ impl Mmu {
 			tlb_tag: [0; TLB_ENTRY_NUM],
 			tlb_value: [0; TLB_ENTRY_NUM],
 			tlb_bitnum: 0,
+
+			dram_latency: 0,
 		}
 	}
 
@@ -248,7 +252,6 @@ impl Mmu {
 	/// * `v_address` Virtual address
 	pub fn fetch_word(&mut self, v_address: u64) -> Result<u32, Trap> {
 		let width = 4;
-		println!("fetching {:x}", v_address);
 		match (v_address & 0xfff) <= (0x1000 - width) {
 			true => {
 				// Fast path. All bytes fetched are in the same page so
@@ -417,12 +420,18 @@ impl Mmu {
 			println!("Resp {:?}", response_string);
 
 			// Latency for accessing memory
-			self.clock = response_string
+			let dram_clk = response_string
 				.split(" ")
 				.last()
 				.unwrap()
 				.parse::<u64>()
 				.unwrap();
+			if dram_clk <= self.clock {
+				panic!("Reverse dram clk!!!");
+			} else {
+				self.dram_latency += dram_clk - self.clock;
+				self.clock = dram_clk;
+			}
 		}
 		#[cfg(not(feature = "dramsim"))]
 		{
@@ -618,12 +627,18 @@ impl Mmu {
 							println!("Resp {:?}", response_string);
 
 							// Latency for accessing memory
-							self.clock = response_string
+							let dram_clk = response_string
 								.split(" ")
 								.last()
 								.unwrap()
 								.parse::<u64>()
 								.unwrap();
+							if dram_clk <= self.clock {
+								panic!("Reverse dram clk!!!");
+							} else {
+								self.dram_latency += dram_clk - self.clock;
+								self.clock = dram_clk;
+							}
 						}
 						#[cfg(not(feature = "dramsim"))]
 						{

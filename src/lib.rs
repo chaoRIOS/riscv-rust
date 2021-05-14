@@ -9,6 +9,7 @@ use self::fnv::FnvHashMap;
 use std::collections::HashMap;
 use std::process;
 use std::str;
+use std::time::{Duration, SystemTime};
 
 pub mod cpu;
 #[cfg(feature = "dramsim")]
@@ -57,6 +58,8 @@ pub struct Emulator {
 	/// [`riscv-tests`](https://github.com/riscv/riscv-tests) specific properties.
 	/// The address where data will be sent to terminal
 	pub tohost_addr: u64,
+
+	pub run_time: f64,
 }
 
 impl Emulator {
@@ -74,6 +77,8 @@ impl Emulator {
 			// These can be updated in setup_program()
 			is_test: false,
 			tohost_addr: 0, // assuming tohost_addr is non-zero if exists
+
+			run_time: 0.0,
 		}
 	}
 
@@ -93,6 +98,11 @@ impl Emulator {
 		// @TODO: Unique config for lab2
 		// self.cpu.x[2] = 0x7f7e9b50;
 
+		self.run_time = SystemTime::now()
+			.duration_since(SystemTime::UNIX_EPOCH)
+			.unwrap()
+			.as_secs_f64();
+
 		loop {
 			#[cfg(feature = "debug-disassemble")]
 			{
@@ -107,6 +117,8 @@ impl Emulator {
 
 			self.tick(trace_memory_access, trace_path);
 		}
+
+		// self.exit();
 	}
 
 	/// Method for running [`riscv-tests`](https://github.com/riscv/riscv-tests) program.
@@ -167,7 +179,7 @@ impl Emulator {
 		// Exit
 		//
 		println!(
-			"Latency = {} cycles",
+			"total Latency = {} cycles",
 			self.cpu.read_csr_raw(CSR_MCYCLE_ADDRESS)
 		);
 		// L1 Cache hit/miss
@@ -193,6 +205,18 @@ impl Emulator {
 				/ (l1_hit_num as f32 + l1_miss_num as f32)
 		);
 
+		// Average miss latency
+		println!(
+			"Cache Miss Latency = {} cycles",
+			(self.cpu.mmu.dram_latency as f32) / (l2_miss_num as f32)
+		);
+
+		let exit_time = SystemTime::now()
+			.duration_since(SystemTime::UNIX_EPOCH)
+			.unwrap()
+			.as_secs_f64();
+		// Total run time
+		println!("Real run time = {} seconds", (exit_time - self.run_time));
 		process::exit(0);
 	}
 

@@ -31,13 +31,6 @@ fn run_elf(
 	let mut elf_file = File::open(input_path)?;
 	let mut elf_contents = vec![];
 	elf_file.read_to_end(&mut elf_contents)?;
-	#[cfg(feature = "dramsim")]
-	{
-		setup_pipe(
-			"/home/cwang/work/riscv-rust/lab2/rqst_to_memory",
-			"/home/cwang/work/riscv-rust/lab2/resp_to_cpu",
-		);
-	}
 	unsafe {
 		EMULATOR.setup_program(elf_contents, memdump_contents);
 		EMULATOR.update_xlen(Xlen::Bit64);
@@ -54,39 +47,55 @@ fn main() -> std::io::Result<()> {
 	let args: Vec<String> = env::args().collect();
 	let mut opts = Options::new();
 	opts.optflagopt("i", "input", "Set input ELF file", "ELF_PATH");
-	opts.optflagopt("t", "trace", "Enable memory access tracing", "TRACE_PATH");
+	opts.optflagopt("t", "req-pipe", "DRAMSim requesting pipe", "TRACE_PATH");
+	opts.optflagopt("T", "resp-pipe", "DRAMSim responsing pipe", "TRACE_PATH");
 	opts.optflag("h", "help", "Show this help menu");
 	opts.optflagopt("m", "memory", "Set memory dump file", "MEMDUMP_PATH");
 	// run_elf(args[1].clone())?;
 	let mut mem_dump: String = "".to_string();
 	match opts.parse(&args[1..]) {
 		Ok(_args) => {
-			match _args.opt_str("m") {
-				Some(path) => {
-					mem_dump = path.to_string();
-				}
-				_ => {
-					println!("{}", opts.usage(&format!("{} [options]", args[0])));
-					return Ok(());
-				}
-			}
-			match _args.opt_str("i") {
-				Some(input_path) => {
-					match _args.opt_str("t") {
-						// @TODO: generate trace
-						Some(trace_path) => {
-							println!("{}", trace_path);
-							let mut file = File::create(&trace_path).unwrap();
-							run_elf(
-								input_path.as_str(),
-								trace_path.as_str(),
-								true,
-								mem_dump.as_str(),
-							)?
-						}
-						_ => run_elf(input_path.as_str(), "", false, mem_dump.as_str())?,
+			#[cfg(feature = "memdump")]
+			{
+				match _args.opt_str("m") {
+					Some(path) => {
+						mem_dump = path.to_string();
+					}
+					_ => {
+						println!("{}", opts.usage(&format!("{} [options]", args[0])));
+						return Ok(());
 					}
 				}
+			}
+
+			#[cfg(feature = "dramsim")]
+			{
+				let request_pipe = match _args.opt_str("t") {
+					Some(trace_path) => trace_path,
+					_ => {
+						println!("{}", opts.usage(&format!("{} [options]", args[0])));
+						return Ok(());
+					}
+				};
+
+				let response_pipe = match _args.opt_str("T") {
+					Some(trace_path) => trace_path,
+					_ => {
+						println!("{}", opts.usage(&format!("{} [options]", args[0])));
+						return Ok(());
+					}
+				};
+				match setup_pipe(request_pipe.as_str(), response_pipe.as_str()) {
+					0 => {}
+					_ => {
+						println!("{}", opts.usage(&format!("{} [options]", args[0])));
+						return Ok(());
+					}
+				};
+			}
+
+			match _args.opt_str("i") {
+				Some(input_path) => run_elf(input_path.as_str(), "", false, mem_dump.as_str())?,
 				_ => {
 					println!("{}", opts.usage(&format!("{} [options]", args[0])));
 					return Ok(());

@@ -344,6 +344,7 @@ impl Cpu {
 				// @TODO: illegal instructions
 				//
 				// Currently used for exitting.
+				self.exit_signal = true;
 				return;
 			}
 		};
@@ -899,7 +900,7 @@ impl Cpu {
 		{
 			if address == CSR_SATP_ADDRESS {
 				// tempoary for lab2
-				println!("Warn: Changing SATP to {}", value);
+				// println!("Warn: Changing SATP to {}", value);
 				self.update_addressing_mode(value);
 				return Ok(());
 			}
@@ -915,7 +916,7 @@ impl Cpu {
 				*/
 				self.write_csr_raw(address, value);
 				if address == CSR_SATP_ADDRESS {
-					println!("Warn: Changing SATP to {}", value);
+					// println!("Warn: Changing SATP to {}", value);
 					self.update_addressing_mode(value);
 				}
 				Ok(())
