@@ -9,7 +9,7 @@ use self::fnv::FnvHashMap;
 use std::collections::HashMap;
 use std::process;
 use std::str;
-use std::time::{Duration, SystemTime};
+use std::time::SystemTime;
 
 pub mod cpu;
 #[cfg(feature = "dramsim")]
@@ -24,6 +24,8 @@ use cpu::{
 	Cpu, Xlen, CSR_HPMCOUNTER3_ADDRESS, CSR_HPMCOUNTER4_ADDRESS, CSR_HPMCOUNTER5_ADDRESS,
 	CSR_HPMCOUNTER6_ADDRESS, CSR_MCYCLE_ADDRESS,
 };
+#[cfg(feature = "dramsim")]
+use dram::{send_request, terminate_pipe};
 use elf_analyzer::ElfAnalyzer;
 use l1cache::L1_CACHE_HIT_LATENCY;
 use l2cache::L2_CACHE_HIT_LATENCY;
@@ -177,6 +179,20 @@ impl Emulator {
 	///
 	fn exit(&mut self) {
 		// Exit
+
+		#[cfg(feature = "dramsim")]
+		{
+			send_request(
+				format!(
+					"{:016x} {} {}",
+					0xffff_ffff_ffff_ffffu64,
+					"END",
+					self.cpu.read_csr_raw(CSR_MCYCLE_ADDRESS)
+				)
+				.as_str(),
+			);
+			terminate_pipe();
+		}
 		//
 		println!(
 			"total Latency = {} cycles",
@@ -376,7 +392,9 @@ impl Emulator {
 		#[cfg(feature = "memdump")]
 		{
 			// write SATP
-			self.cpu.write_csr(0x180, 0x8000000000080016);
+			match self.cpu.write_csr(0x180, 0x8000000000080016) {
+				_ => {}
+			};
 			// write sp
 			self.cpu.update_gpr(String::from("sp"), 0x7f7e9b50);
 		}

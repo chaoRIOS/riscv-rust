@@ -140,16 +140,16 @@ impl Mmu {
 	/// # Arguments
 	/// * `mode`
 	pub fn update_privilege_mode(&mut self, mode: PrivilegeMode) {
-		println!(
-			"Warn: changing PRIVILEGE MODE to {}",
-			match mode {
-				PrivilegeMode::Machine => "machine",
-				PrivilegeMode::Supervisor => "sup",
-				PrivilegeMode::User => "user",
-				PrivilegeMode::Reserved => "resev",
-				_ => "panic",
-			}
-		);
+		// println!(
+		// 	"Warn: changing PRIVILEGE MODE to {}",
+		// 	match mode {
+		// 		PrivilegeMode::Machine => "machine",
+		// 		PrivilegeMode::Supervisor => "sup",
+		// 		PrivilegeMode::User => "user",
+		// 		PrivilegeMode::Reserved => "resev",
+		// 		// _ => "panic",
+		// 	}
+		// );
 		self.privilege_mode = mode;
 	}
 
@@ -1161,14 +1161,14 @@ impl Mmu {
 				panic!("AddressingMode SV48 is not supported yet.");
 			}
 		};
-		match p_address {
-			Ok(address) => {
-				// println!("detecter PADDR={}", p_address.unwrap());
-			}
-			_ => {
-				println!("ERROR: at translate_address paddr==err(())");
-			}
-		}
+		// match p_address {
+		// 	Ok(address) => {
+		// 		// println!("detecter PADDR={}", p_address.unwrap());
+		// 	}
+		// 	_ => {
+		// 		println!("ERROR: at translate_address paddr==err(())");
+		// 	}
+		// }
 		p_address
 	}
 
