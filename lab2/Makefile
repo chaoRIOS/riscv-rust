@@ -54,5 +54,5 @@ build:
 	RUSTFLAGS="-L $(PROJ_DIR)/lab2/csrc -linterface" cargo build --features memdump,dramsim
 
 
-BFS2.0:
-	LD_LIBRARY_PATH="$(PROJ_DIR)/lab2/csrc" $(RELEASE_PATH)/lab2 -m $(TEST_PATH)/BFS2.0.txt -i $(TEST_PATH)/BFS2.0.o -t $(REQ_PIPE) -T $(RESP_PIPE)
+run:
+	$(RELEASE_PATH)/lab2 -m $(TEST_PATH)/$(test).txt -i $(TEST_PATH)/$(test).o -t $(REQ_PIPE) -T $(RESP_PIPE)
