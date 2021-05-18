@@ -7,7 +7,7 @@ use l1cache::{PlacementPolicy, L1_CACHE_SIZE};
 pub const L2_CACHE_BLOCK_SIZE: i32 = 64;
 
 /// 8*L1 L2 cache size
-pub const L2_CACHE_SIZE: i32 = 8 * L1_CACHE_SIZE;
+pub const L2_CACHE_SIZE: i32 = 4 * L1_CACHE_SIZE;
 
 /// 8-way set-associative
 pub const L2_SET_ASSOCIATIVE_WAY: i32 = 8;

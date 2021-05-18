@@ -5,10 +5,10 @@ use rand::random;
 pub const L1_CACHE_BLOCK_SIZE: i32 = 64;
 
 /// 32K L1 cache size
-pub const L1_CACHE_SIZE: i32 = 32768;
+pub const L1_CACHE_SIZE: i32 = 1024 * 1024;
 
-/// 8-way set-associative
-pub const L1_SET_ASSOCIATIVE_WAY: i32 = 8;
+/// 2-way set-associative
+pub const L1_SET_ASSOCIATIVE_WAY: i32 = 2;
 
 /// number of sets
 pub const L1_CACHE_SET_NUMBER: i32 = L1_CACHE_SIZE / (L1_CACHE_BLOCK_SIZE * L1_SET_ASSOCIATIVE_WAY);
