@@ -1,6 +1,8 @@
 extern crate fnv;
 
-use mmu::{AddressingMode, Mmu};
+use mmu::{AddressingMode, MemoryAccessType, Mmu};
+use std::fs::OpenOptions;
+use std::io::prelude::*;
 
 pub const CSR_CAPACITY: usize = 4096;
 
@@ -40,10 +42,17 @@ const CSR_MTVAL_ADDRESS: u16 = 0x343;
 const CSR_MIP_ADDRESS: u16 = 0x344;
 const _CSR_PMPCFG0_ADDRESS: u16 = 0x3a0;
 const _CSR_PMPADDR0_ADDRESS: u16 = 0x3b0;
-const _CSR_MCYCLE_ADDRESS: u16 = 0xb00;
-const CSR_CYCLE_ADDRESS: u16 = 0xc00;
+pub const CSR_MCYCLE_ADDRESS: u16 = 0xb00;
+const _CSR_CYCLE_ADDRESS: u16 = 0xc00;
 const CSR_TIME_ADDRESS: u16 = 0xc01;
 const _CSR_INSERT_ADDRESS: u16 = 0xc02;
+
+pub const CSR_HPMCOUNTER3_ADDRESS: u16 = 0xc03;
+pub const CSR_HPMCOUNTER4_ADDRESS: u16 = 0xc04;
+pub const CSR_HPMCOUNTER5_ADDRESS: u16 = 0xc05;
+pub const CSR_HPMCOUNTER6_ADDRESS: u16 = 0xc06;
+pub const _CSR_HPMCOUNTER7_ADDRESS: u16 = 0xc07;
+
 const _CSR_MHARTID_ADDRESS: u16 = 0xf14;
 
 const MIP_MEIP: u64 = 0x800;
@@ -71,6 +80,10 @@ pub struct Cpu {
 	pub is_reservation_set: bool,
 	pub _dump_flag: bool,
 	pub unsigned_data_mask: u64,
+	pub tohost_addr: u64,
+
+	// Exit signal
+	pub exit_signal: bool,
 }
 
 #[derive(Clone)]
@@ -79,7 +92,7 @@ pub enum Xlen {
 	Bit64, // @TODO: Support Bit128
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 #[allow(dead_code)]
 pub enum PrivilegeMode {
 	User,
@@ -88,11 +101,13 @@ pub enum PrivilegeMode {
 	Machine,
 }
 
+#[derive(Debug)]
 pub struct Trap {
 	pub trap_type: TrapType,
 	pub value: u64, // Trap type specific value
 }
 
+#[derive(Debug)]
 #[allow(dead_code)]
 pub enum TrapType {
 	InstructionAddressMisaligned,
@@ -215,7 +230,7 @@ impl Cpu {
 		let mut cpu = Cpu {
 			clock: 0,
 			xlen: Xlen::Bit64,
-			privilege_mode: PrivilegeMode::Machine,
+			privilege_mode: PrivilegeMode::User,
 			wfi: false,
 			x: [0; 32],
 			f: [0.0; 32],
@@ -227,6 +242,9 @@ impl Cpu {
 			is_reservation_set: false,
 			_dump_flag: false,
 			unsigned_data_mask: 0xffffffffffffffff,
+			tohost_addr: 0,
+
+			exit_signal: false,
 		};
 		cpu.x[0xb] = 0x1020; // I don't know why but Linux boot seems to require this initialization
 		cpu.write_csr_raw(CSR_MISA_ADDRESS, 0x800000008014312f);
@@ -239,6 +257,18 @@ impl Cpu {
 	/// * `value`
 	pub fn update_pc(&mut self, value: u64) {
 		self.pc = value;
+	}
+
+	/// Updates GPR
+	/// # input gpr_name e.g. "sp", value e.g. 0x123456
+	pub fn update_gpr(&mut self, gpr_name: String, value: i64) {
+		for i in 0..31 {
+			if get_register_name(i) == gpr_name.as_str() {
+				self.x[i] = value;
+				// println!("updating gpr {} (x[{}]) to {}", gpr_name.as_str(), i, value);
+				return;
+			}
+		}
 	}
 
 	/// Updates XLEN, 32-bit or 64-bit
@@ -272,11 +302,84 @@ impl Cpu {
 	}
 
 	/// Runs program one cycle. Fetch, decode, and execution are completed in a cycle so far.
-	pub fn tick(&mut self) {
+	pub fn tick(&mut self, trace_memory_access: bool, trace_path: &str) {
 		let instruction_address = self.pc;
-		match self.tick_operate() {
-			Ok(()) => {}
-			Err(e) => self.handle_exception(e, instruction_address),
+
+		if self.wfi {
+			if (self.read_csr_raw(CSR_MIE_ADDRESS) & self.read_csr_raw(CSR_MIP_ADDRESS)) != 0 {
+				self.wfi = false;
+			}
+			// @TODO: determine WFI latency
+			return;
+		}
+
+		let word = match self.fetch_uncompress() {
+			Ok(word) => word,
+			Err(e) => {
+				// Handle instruction page fault
+				self.handle_exception(e, instruction_address);
+				// @TODO: fix
+				// e.g. add fetch latency
+				return;
+			}
+		};
+
+		let decode_result = self.decode(word, instruction_address);
+
+		// Extra exit after decode stage, because we handle to/from host operation in decode stage.
+		// Currently detect as exit when
+		// * tohost address is set
+		// * JAL to the identical address
+		// * ECALL
+		let pipeline_result = match decode_result {
+			Ok(inst) => {
+				// println!("inst={},pc={}", inst.get_name(), instruction_address);
+				let cycles = inst.cycles;
+				let result = (inst.operation)(self, word, instruction_address);
+				self.x[0] = 0; // hardwired zero
+
+				(result, cycles)
+			}
+			Err(()) => {
+				// @TODO: illegal instructions
+				//
+				// Currently used for exitting.
+				self.exit_signal = true;
+				return;
+			}
+		};
+
+		match pipeline_result.0 {
+			Ok(()) => {
+				self.mmu.clock = self.mmu.clock.wrapping_add(pipeline_result.1 as u64);
+				self.clock = self.mmu.clock;
+			}
+			Err(e) => {
+				// Handle pipeline traps
+				self.clock = self.mmu.clock;
+				self.handle_exception(e, instruction_address);
+			}
+		}
+
+		if trace_memory_access == true {
+			for i in 0..self.mmu.memory_access_trace.len() {
+				let mut file = OpenOptions::new().append(true).open(trace_path).unwrap();
+
+				file.write(
+					format!(
+						"0x{:016x} {} {}\n",
+						self.mmu.memory_access_trace[i].address,
+						match self.mmu.memory_access_trace[i].operation {
+							MemoryAccessType::Read => "READ",
+							MemoryAccessType::Write => "WRITE",
+							_ => "",
+						},
+						self.mmu.memory_access_trace[i].cycle
+					)
+					.as_bytes(),
+				)
+				.unwrap();
+			}
 		}
 		self.mmu.tick(&mut self.csr[CSR_MIP_ADDRESS as usize]);
 		self.handle_interrupt(self.pc);
@@ -286,23 +389,27 @@ impl Cpu {
 		// just an arbiraty ratio.
 		// @TODO: Implement more properly
 		// self.write_csr_raw(CSR_CYCLE_ADDRESS, self.clock * 8);
-		self.write_csr_raw(_CSR_MCYCLE_ADDRESS, self.clock);
+		self.write_csr_raw(CSR_MCYCLE_ADDRESS, self.clock);
+		self.write_csr_raw(CSR_HPMCOUNTER3_ADDRESS, self.mmu.l1_cache.hit_num);
+		self.write_csr_raw(CSR_HPMCOUNTER4_ADDRESS, self.mmu.l1_cache.miss_num);
+		self.write_csr_raw(CSR_HPMCOUNTER5_ADDRESS, self.mmu.l2_cache.hit_num);
+		self.write_csr_raw(CSR_HPMCOUNTER6_ADDRESS, self.mmu.l2_cache.miss_num);
 	}
 
 	// @TODO: Rename?
-	fn tick_operate(&mut self) -> Result<(), Trap> {
-		if self.wfi {
-			if (self.read_csr_raw(CSR_MIE_ADDRESS) & self.read_csr_raw(CSR_MIP_ADDRESS)) != 0 {
-				self.wfi = false;
-			}
-			return Ok(());
-		}
+	fn fetch_uncompress(&mut self) -> Result<u32, Trap> {
+		// if self.wfi {
+		// 	if (self.read_csr_raw(CSR_MIE_ADDRESS) & self.read_csr_raw(CSR_MIP_ADDRESS)) != 0 {
+		// 		self.wfi = false;
+		// 	}
+		// 	// @TODO: determine WFI latency
+		// 	return Ok(1);
+		// }
 
 		let original_word = match self.fetch() {
 			Ok(word) => word,
 			Err(e) => return Err(e),
 		};
-		let instruction_address = self.pc;
 		let word = match (original_word & 0x3) == 0x3 {
 			true => {
 				self.pc = self.pc.wrapping_add(4); // 32-bit length non-compressed instruction
@@ -314,31 +421,105 @@ impl Cpu {
 			}
 		};
 
-		match self.decode(word) {
-			Ok(inst) => {
-				let cycles = inst.cycles;
-				let result = (inst.operation)(self, word, instruction_address);
-				self.x[0] = 0; // hardwired zero
-				self.clock = self.clock.wrapping_add(cycles.into()); // 32-bit length non-compressed instruction
-
-				return result;
-			}
-			Err(()) => {
-				panic!(
-					"Unknown instruction PC:{:x} WORD:{:x}",
-					instruction_address, original_word
-				);
-			}
-		};
+		Ok(word)
+		// println!("disass: {}", self.disassemble_next_instruction());
 	}
 
 	/// Decodes a word instruction data and returns a reference to
 	/// [`Instruction`](struct.Instruction.html). Using [`DecodeCache`](struct.DecodeCache.html)
 	/// so if cache hits this method returns the result very quickly.
 	/// The result will be stored to cache.
-	pub fn decode(&mut self, word: u32) -> Result<&Instruction, ()> {
+	pub fn decode(&mut self, word: u32, instruction_address: u64) -> Result<&Instruction, ()> {
 		match self.decode_and_get_instruction_index(word) {
-			Ok(index) => Ok(&INSTRUCTIONS[index]),
+			Ok(index) => {
+				// Handle to/from host
+				let inst = &INSTRUCTIONS[index];
+				match inst.name {
+					"SD" | "SW" | "SH" | "SB" => {
+						let f = parse_format_s(word);
+						if self.x[f.rs1].wrapping_add(f.imm) == (self.tohost_addr as i64) {
+							#[cfg(feature = "debug-tohost")]
+							println!(
+								"[Tohost] {} {:x} to {:x}",
+								inst.name,
+								self.x[f.rs2],
+								self.x[f.rs1].wrapping_add(f.imm)
+							);
+							let tohost_addr = self.tohost_addr;
+							let tohost_data_addr = self.x[f.rs2];
+							match tohost_data_addr {
+								0..=0x80000000 => {
+									// Exit for riscv-test on tohost getting 1/0
+									//
+									// @TODO: Add pass of fail printing
+									self.exit_signal = true;
+									return Err(());
+								}
+								_ => {
+									// Tohost I/O stream
+									//
+									// @TODO: optimize
+									let flag1 = self
+										.get_mut_mmu()
+										.load_word_raw((24 + tohost_data_addr) as u64)
+										!= 0;
+									let flag2 = self
+										.get_mut_mmu()
+										.load_word_raw((28 + tohost_data_addr) as u64)
+										!= 0;
+									if flag1 || flag2 {
+										let base = self
+											.get_mut_mmu()
+											.load_word_raw((4 * 4 + tohost_data_addr) as u64);
+										let length = self
+											.get_mut_mmu()
+											.load_word_raw((6 * 4 + tohost_data_addr) as u64);
+										for i in 0..length {
+											let data =
+												self.get_mut_mmu().load_raw((i + base) as u64);
+											print!("{}", data as char);
+										}
+									}
+
+									// After printf, set 1 to fromhost and set 0 to tohost
+									// Note: host needs to access cache instead of memory!
+									self.get_mut_mmu().store_word_raw(tohost_addr + 0x40, 1);
+									self.get_mut_mmu().store_word_raw(tohost_addr, 0);
+
+									// Exit after print to host
+									//
+									// @TODO: verify
+									self.exit_signal = true;
+									return Err(());
+								}
+							};
+						}
+					}
+					"JAL" => {
+						// Exit on iterative JAL
+						//
+						// @TODO: Add error exit status
+						let f = parse_format_j(word);
+						// println!(
+						// 	"[{}] inst.add:0x{:x} imm:0x{:x} add+imm:0x{:x}",
+						// 	self.clock,
+						// 	instruction_address,
+						// 	f.imm,
+						// 	instruction_address + f.imm
+						// );
+						if instruction_address + f.imm == instruction_address {
+							self.exit_signal = true;
+							return Err(());
+						}
+					}
+					"ECALL" => {
+						self.exit_signal = true;
+						return Err(());
+					}
+					_ => {}
+				}
+				Ok(&INSTRUCTIONS[index])
+			}
 			Err(()) => Err(()),
 		}
 	}
@@ -714,7 +895,16 @@ impl Cpu {
 		}
 	}
 
-	fn write_csr(&mut self, address: u16, value: u64) -> Result<(), Trap> {
+	pub fn write_csr(&mut self, address: u16, value: u64) -> Result<(), Trap> {
+		#[cfg(feature = "memdump")]
+		{
+			if address == CSR_SATP_ADDRESS {
+				// tempoary for lab2
+				// println!("Warn: Changing SATP to {}", value);
+				self.update_addressing_mode(value);
+				return Ok(());
+			}
+		}
 		match self.has_csr_access_privilege(address) {
 			true => {
 				/*
@@ -726,6 +916,7 @@ impl Cpu {
 				*/
 				self.write_csr_raw(address, value);
 				if address == CSR_SATP_ADDRESS {
+					// println!("Warn: Changing SATP to {}", value);
 					self.update_addressing_mode(value);
 				}
 				Ok(())
@@ -813,7 +1004,7 @@ impl Cpu {
 		self.csr[CSR_FCSR_ADDRESS as usize] |= 0x1;
 	}
 
-	fn update_addressing_mode(&mut self, value: u64) {
+	pub fn update_addressing_mode(&mut self, value: u64) {
 		let addressing_mode = match self.xlen {
 			Xlen::Bit32 => match value & 0x80000000 {
 				0 => AddressingMode::None,
@@ -1384,6 +1575,12 @@ impl Cpu {
 		};
 
 		let mut s = format!("PC:{:016x} ", self.unsigned_data(self.pc as i64));
+		match self.pc {
+			0x00010298u64 | 0x0001029au64 | 0x0001029cu64 | 0x0001029eu64 => {
+				return String::from("");
+			}
+			_ => {}
+		}
 		s += &format!("{:08x} ", original_word);
 		s += &format!("{} ", inst.name);
 		s += &format!("{}", (inst.disassemble)(self, word, self.pc, true));
@@ -2493,8 +2690,10 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		data: 0x0000000f,
 		name: "FENCE",
 		cycles: 1,
-		operation: |_cpu, _word, _address| {
-			// Do nothing?
+		operation: |cpu, _word, _address| {
+			// Flush write back L1 cache
+			cpu.get_mut_mmu().l1_flush();
+			cpu.get_mut_mmu().l2_flush();
 			Ok(())
 		},
 		disassemble: dump_empty,

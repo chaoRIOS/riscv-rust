@@ -1,19 +1,34 @@
 // @TODO: temporal
-const TEST_MEMORY_CAPACITY: u64 = 1024 * 512;
-const PROGRAM_MEMORY_CAPACITY: u64 = 1024 * 1024 * 128; // big enough to run Linux and xv6
+const TEST_MEMORY_CAPACITY: u64 = 1024 * 1024 * 2048;
+const PROGRAM_MEMORY_CAPACITY: u64 = 1024 * 1024 * 2049; // big enough to run Linux and xv6
 
 extern crate fnv;
+extern crate rand;
+
 use self::fnv::FnvHashMap;
 use std::collections::HashMap;
+use std::process;
 use std::str;
+use std::time::SystemTime;
 
 pub mod cpu;
+#[cfg(feature = "dramsim")]
+pub mod dram;
 pub mod elf_analyzer;
+pub mod l1cache;
+pub mod l2cache;
 pub mod memory;
 pub mod mmu;
 
-use cpu::{Cpu, Xlen};
+use cpu::{
+	Cpu, Xlen, CSR_HPMCOUNTER3_ADDRESS, CSR_HPMCOUNTER4_ADDRESS, CSR_HPMCOUNTER5_ADDRESS,
+	CSR_HPMCOUNTER6_ADDRESS, CSR_MCYCLE_ADDRESS,
+};
+#[cfg(feature = "dramsim")]
+use dram::{send_request, terminate_pipe};
 use elf_analyzer::ElfAnalyzer;
+use l1cache::L1_CACHE_HIT_LATENCY;
+use l2cache::L2_CACHE_HIT_LATENCY;
 
 /// RISC-V emulator. It emulates RISC-V CPU and peripheral devices.
 ///
@@ -45,6 +60,8 @@ pub struct Emulator {
 	/// [`riscv-tests`](https://github.com/riscv/riscv-tests) specific properties.
 	/// The address where data will be sent to terminal
 	pub tohost_addr: u64,
+
+	pub run_time: f64,
 }
 
 impl Emulator {
@@ -62,6 +79,8 @@ impl Emulator {
 			// These can be updated in setup_program()
 			is_test: false,
 			tohost_addr: 0, // assuming tohost_addr is non-zero if exists
+
+			run_time: 0.0,
 		}
 	}
 
@@ -71,67 +90,37 @@ impl Emulator {
 	pub fn run(&mut self) {
 		match self.is_test {
 			true => self.run_test(),
-			false => self.run_program(),
+			false => self.run_program(false, ""),
 		};
 	}
 
 	/// Runs program set by `setup_program()`. The emulator won't stop forever.
 	/// * Added our print function.
-	pub fn run_program(&mut self) {
-		// let fromhost_addr = 0x80001040;
-		// let fromhost_addr = 0x80001ea0;
-		// let fromhost_addr = 0x800011a0;
+	pub fn run_program(&mut self, trace_memory_access: bool, trace_path: &str) {
+		// @TODO: Unique config for lab2
+		// self.cpu.x[2] = 0x7f7e9b50;
+
+		self.run_time = SystemTime::now()
+			.duration_since(SystemTime::UNIX_EPOCH)
+			.unwrap()
+			.as_secs_f64();
+
 		loop {
-			// let disas = self.cpu.disassemble_next_instruction();
-			// self.put_bytes_to_terminal(disas.as_bytes());
-			// self.put_bytes_to_terminal(&[10]); // new line
-			let tohost_data_addr = self.cpu.get_mut_mmu().load_word_raw(self.tohost_addr);
-			if tohost_data_addr != 0 {
-				match tohost_data_addr {
-					0..=0x80000000 => {
-						println!("{:x}", tohost_data_addr);
-						break;
-					}
-					_ => {
-						// let disas = self.cpu.disassemble_next_instruction();
-						// self.put_bytes_to_terminal(disas.as_bytes());
-						// self.put_bytes_to_terminal(&[10]); // new line
-						if self
-							.cpu
-							.get_mut_mmu()
-							.load_word_raw((24 + tohost_data_addr).into())
-							!= 0 || self
-							.cpu
-							.get_mut_mmu()
-							.load_word_raw((28 + tohost_data_addr).into())
-							!= 0
-						{
-							let base = self
-								.cpu
-								.get_mut_mmu()
-								.load_word_raw((4 * 4 + tohost_data_addr).into());
-							let length = self
-								.cpu
-								.get_mut_mmu()
-								.load_word_raw((6 * 4 + tohost_data_addr).into());
-							for i in 0..length {
-								let data = self.cpu.get_mut_mmu().load_raw((i + base).into());
-								print!("{}", data as char);
-							}
-						}
-						self.cpu
-							.get_mut_mmu()
-							.store_word_raw(self.tohost_addr + 8, 1);
-						self.cpu.get_mut_mmu().store_word_raw(self.tohost_addr, 0);
-					}
-				};
+			#[cfg(feature = "debug-disassemble")]
+			{
+				let disas = self.cpu.disassemble_next_instruction();
+
+				// ignore memset
+				if disas.as_str() != "" {
+					self.put_bytes_to_terminal(disas.as_bytes());
+					self.put_bytes_to_terminal(&[10]); // new line
+				}
 			}
-			self.tick();
+
+			self.tick(trace_memory_access, trace_path);
 		}
 
-		let _csr_mcycle_address: u16 = 0xb00;
-		let _latency = self.get_cpu().read_csr_raw(_csr_mcycle_address);
-		println!("Latency = {} cycles", _latency);
+		// self.exit();
 	}
 
 	/// Method for running [`riscv-tests`](https://github.com/riscv/riscv-tests) program.
@@ -147,7 +136,7 @@ impl Emulator {
 			self.put_bytes_to_terminal(disas.as_bytes());
 			self.put_bytes_to_terminal(&[10]); // new line
 
-			self.tick();
+			self.tick(false, "");
 
 			// It seems in riscv-tests ends with end code
 			// written to a certain physical memory address
@@ -186,9 +175,73 @@ impl Emulator {
 		}
 	}
 
+	/// Exit method. Prints needed output
+	///
+	fn exit(&mut self) {
+		// Exit
+
+		#[cfg(feature = "dramsim")]
+		{
+			send_request(
+				format!(
+					"{:016x} {} {}",
+					0xffff_ffff_ffff_ffffu64,
+					"END",
+					self.cpu.read_csr_raw(CSR_MCYCLE_ADDRESS)
+				)
+				.as_str(),
+			);
+			terminate_pipe();
+		}
+		//
+		println!(
+			"total Latency = {} cycles",
+			self.cpu.read_csr_raw(CSR_MCYCLE_ADDRESS)
+		);
+		// L1 Cache hit/miss
+		let l1_hit_num = self.cpu.read_csr_raw(CSR_HPMCOUNTER3_ADDRESS);
+		let l1_miss_num = self.cpu.read_csr_raw(CSR_HPMCOUNTER4_ADDRESS);
+		// L2 Cache hit/miss
+		let _l2_hit_num = self.cpu.read_csr_raw(CSR_HPMCOUNTER5_ADDRESS);
+		let l2_miss_num = self.cpu.read_csr_raw(CSR_HPMCOUNTER6_ADDRESS);
+		println!(
+			"Cache Hit rate = {}%",
+			100f32 * (1f32 - (l2_miss_num as f32 / (l1_hit_num + l1_miss_num) as f32))
+		);
+		println!(
+			"Cache Miss rate = {}%",
+			((l2_miss_num * 100) as f32 / (l1_hit_num + l1_miss_num) as f32) as f32
+		);
+
+		// Average hit latency
+		println!(
+			"Cache Hit Latency = {} cycles",
+			(l1_hit_num as f32 * L1_CACHE_HIT_LATENCY as f32
+				+ l1_miss_num as f32 * L2_CACHE_HIT_LATENCY as f32)
+				/ (l1_hit_num as f32 + l1_miss_num as f32)
+		);
+
+		// Average miss latency
+		println!(
+			"Cache Miss Latency = {} cycles",
+			(self.cpu.mmu.dram_latency as f32) / (l2_miss_num as f32)
+		);
+
+		let exit_time = SystemTime::now()
+			.duration_since(SystemTime::UNIX_EPOCH)
+			.unwrap()
+			.as_secs_f64();
+		// Total run time
+		println!("Real run time = {} seconds", (exit_time - self.run_time));
+		process::exit(0);
+	}
+
 	/// Runs CPU one cycle
-	pub fn tick(&mut self) {
-		self.cpu.tick();
+	pub fn tick(&mut self, trace_memory_access: bool, trace_path: &str) {
+		self.cpu.tick(trace_memory_access, trace_path);
+		if self.cpu.exit_signal == true {
+			self.exit();
+		}
 	}
 
 	/// Sets up program run by the program. This method analyzes the passed content
@@ -199,7 +252,7 @@ impl Emulator {
 	/// * `data` Program binary
 	// @TODO: Make ElfAnalyzer and move the core logic there.
 	// @TODO: Returns `Err` if the passed contend doesn't seem ELF file
-	pub fn setup_program(&mut self, data: Vec<u8>) {
+	pub fn setup_program(&mut self, data: Vec<u8>, memdump_contents: Vec<u8>) {
 		let analyzer = ElfAnalyzer::new(data);
 
 		if !analyzer.validate() {
@@ -231,6 +284,7 @@ impl Emulator {
 			// None => 0x80001ea8,
 			None => 0x80001198,
 		};
+		self.cpu.tohost_addr = self.tohost_addr;
 
 		// Creates symbol - virtual address mapping
 		if string_table_section_headers.len() > 0 {
@@ -255,11 +309,72 @@ impl Emulator {
 		});
 
 		if self.tohost_addr != 0 {
+			// @TODO : modify this rule
 			self.is_test = true;
 			self.cpu.get_mut_mmu().init_memory(TEST_MEMORY_CAPACITY);
 		} else {
 			self.is_test = false;
 			self.cpu.get_mut_mmu().init_memory(PROGRAM_MEMORY_CAPACITY);
+		}
+		#[cfg(feature = "memdump")]
+		{
+			let mut iter_num = 0;
+			loop {
+				let mut left_addr: u64 = 0;
+				{
+					while memdump_contents[iter_num] != 'x' as u8 {
+						iter_num = iter_num + 1;
+					}
+					for j in iter_num + 1..memdump_contents.len() {
+						if memdump_contents[j] == 32 || memdump_contents[j] == 10 {
+							iter_num = j;
+							break;
+						} else {
+							let mut tmp = memdump_contents[j];
+							if memdump_contents[j] >= 'a' as u8 && memdump_contents[j] <= 'f' as u8
+							{
+								tmp = tmp - 'a' as u8 + 10 + 48;
+							}
+							if memdump_contents[j] >= 'A' as u8 && memdump_contents[j] <= 'F' as u8
+							{
+								tmp = tmp - 'A' as u8 + 10 + 48;
+							}
+							left_addr = left_addr * 16 + tmp as u64 - 48;
+						}
+					}
+				}
+				let mut right_value: u64 = 0;
+				{
+					while memdump_contents[iter_num] != ' ' as u8 {
+						iter_num = iter_num + 1;
+					}
+					for j in iter_num + 1..memdump_contents.len() {
+						if memdump_contents[j] == 32 || memdump_contents[j] == 10 {
+							iter_num = j;
+							break;
+						} else {
+							let mut tmp = memdump_contents[j];
+							if memdump_contents[j] >= 'a' as u8 && memdump_contents[j] <= 'f' as u8
+							{
+								tmp = tmp - 'a' as u8 + 10 + 48;
+							}
+							if memdump_contents[j] >= 'A' as u8 && memdump_contents[j] <= 'F' as u8
+							{
+								tmp = tmp - 'A' as u8 + 10 + 48;
+							}
+							right_value = right_value * 16 + tmp as u64 - 48;
+						}
+					}
+				}
+				//println!("[debug log] commiting value {} to addr {}",right_value,left_addr);
+				self.cpu
+					.get_mut_mmu()
+					.store_doubleword_raw(left_addr, right_value);
+				iter_num = iter_num + 1;
+				if iter_num >= memdump_contents.len() {
+					break;
+				}
+			}
 		}
 
 		for i in 0..program_data_section_headers.len() {
@@ -274,7 +389,15 @@ impl Emulator {
 				}
 			}
 		}
-
+		#[cfg(feature = "memdump")]
+		{
+			// write SATP
+			match self.cpu.write_csr(0x180, 0x8000000000080016) {
+				_ => {}
+			};
+			// write sp
+			self.cpu.update_gpr(String::from("sp"), 0x7f7e9b50);
+		}
 		self.cpu.update_pc(header.e_entry);
 	}
 

@@ -2,6 +2,8 @@
 // use crate::utils::*;
 use fnv::FnvHashMap;
 use riscv_emu_rust::cpu::*;
+use riscv_emu_rust::l1cache::*;
+use riscv_emu_rust::l2cache::*;
 use riscv_emu_rust::memory::*;
 use riscv_emu_rust::mmu::*;
 use riscv_emu_rust::Emulator;
@@ -14,7 +16,7 @@ pub static mut EMULATOR: Emulator = Emulator {
 	cpu: Cpu {
 		clock: 0,
 		xlen: Xlen::Bit64,
-		privilege_mode: PrivilegeMode::Machine,
+		privilege_mode: PrivilegeMode::User,
 		wfi: false,
 		x: [0; 32],
 		f: [0.0; 32],
@@ -26,16 +28,29 @@ pub static mut EMULATOR: Emulator = Emulator {
 			xlen: Xlen::Bit64,
 			ppn: 0,
 			addressing_mode: AddressingMode::None,
-			privilege_mode: PrivilegeMode::Machine,
+			privilege_mode: PrivilegeMode::User,
 			memory: MemoryWrapper {
 				memory: Memory { data: vec![] },
 			},
+			l1_cache: L1Cache::static_new(),
+			l2_cache: L2Cache::static_new(),
+
+			memory_access_trace: vec![],
+
 			mstatus: 0,
+			tlb_tag: [0; TLB_ENTRY_NUM],
+			tlb_value: [0; TLB_ENTRY_NUM],
+			tlb_bitnum: 0,
+
+			dram_latency: 0,
 		},
 		reservation: 0,
 		is_reservation_set: false,
 		_dump_flag: false,
 		unsigned_data_mask: 0xffffffffffffffff,
+		tohost_addr: 0,
+
+		exit_signal: false,
 	},
 
 	symbol_map: None,
@@ -46,6 +61,8 @@ pub static mut EMULATOR: Emulator = Emulator {
 	// These can be updated in setup_program()
 	is_test: false,
 	tohost_addr: 0,
+
+	run_time: 0.0,
 };
 
 pub const COSIM_INSTRUCTIONS: [&'static str; 75] = [

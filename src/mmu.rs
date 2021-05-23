@@ -2,9 +2,16 @@
 /// is the address in main memory.
 pub const DRAM_BASE: u64 = 0x80000000;
 
+/// @TODO: (dev)Enable TLB
+const ENABLE_TLB: bool = true;
+
 extern crate fnv;
 
 use cpu::{get_privilege_mode, PrivilegeMode, Trap, TrapType, Xlen};
+#[cfg(feature = "dramsim")]
+use dram::*;
+use l1cache::*;
+use l2cache::*;
 use memory::Memory;
 
 /// Emulates Memory Management Unit. It holds the Main memory and peripheral
@@ -12,6 +19,9 @@ use memory::Memory;
 /// It also manages virtual-physical address translation and memoty protection.
 /// It may also be said Bus.
 /// @TODO: Memory protection is not implemented yet. We should support.
+
+pub const TLB_ENTRY_NUM: usize = 64;
+
 pub struct Mmu {
 	pub clock: u64,
 	pub xlen: Xlen,
@@ -19,12 +29,22 @@ pub struct Mmu {
 	pub addressing_mode: AddressingMode,
 	pub privilege_mode: PrivilegeMode,
 	pub memory: MemoryWrapper,
+	pub l1_cache: L1Cache,
+	pub l2_cache: L2Cache,
+
+	pub memory_access_trace: Vec<MemoryAccessTrace>,
 
 	/// Address translation can be affected `mstatus` (MPRV, MPP in machine mode)
 	/// then `Mmu` has copy of it.
 	pub mstatus: u64,
+	pub tlb_tag: [u64; TLB_ENTRY_NUM],
+	pub tlb_value: [u64; TLB_ENTRY_NUM],
+	pub tlb_bitnum: usize,
+
+	pub dram_latency: u64,
 }
 
+#[derive(Debug)]
 pub enum AddressingMode {
 	None,
 	SV32,
@@ -32,7 +52,13 @@ pub enum AddressingMode {
 	SV48, // @TODO: Implement
 }
 
-enum MemoryAccessType {
+pub struct MemoryAccessTrace {
+	pub address: u64,
+	pub operation: MemoryAccessType,
+	pub cycle: u64,
+}
+
+pub enum MemoryAccessType {
 	Execute,
 	Read,
 	Write,
@@ -59,9 +85,19 @@ impl Mmu {
 			xlen: xlen,
 			ppn: 0,
 			addressing_mode: AddressingMode::None,
-			privilege_mode: PrivilegeMode::Machine,
+			privilege_mode: PrivilegeMode::User,
 			memory: MemoryWrapper::new(),
+			l1_cache: L1Cache::new(),
+			l2_cache: L2Cache::new(),
+
+			memory_access_trace: vec![],
+
 			mstatus: 0,
+			tlb_tag: [0; TLB_ENTRY_NUM],
+			tlb_value: [0; TLB_ENTRY_NUM],
+			tlb_bitnum: 0,
+
+			dram_latency: 0,
 		}
 	}
 
@@ -83,7 +119,12 @@ impl Mmu {
 
 	/// Runs one cycle of MMU and peripheral devices.
 	pub fn tick(&mut self, _mip: &mut u64) {
-		self.clock = self.clock.wrapping_add(1);
+		// mmu clock is synced in cpu.tick()
+
+		// Flush memory access trace
+		if self.memory_access_trace.len() > 0 {
+			self.memory_access_trace = vec![];
+		}
 	}
 
 	/// Updates addressing mode
@@ -99,6 +140,16 @@ impl Mmu {
 	/// # Arguments
 	/// * `mode`
 	pub fn update_privilege_mode(&mut self, mode: PrivilegeMode) {
+		// println!(
+		// 	"Warn: changing PRIVILEGE MODE to {}",
+		// 	match mode {
+		// 		PrivilegeMode::Machine => "machine",
+		// 		PrivilegeMode::Supervisor => "sup",
+		// 		PrivilegeMode::User => "user",
+		// 		PrivilegeMode::Reserved => "resev",
+		// 		// _ => "panic",
+		// 	}
+		// );
 		self.privilege_mode = mode;
 	}
 
@@ -139,39 +190,6 @@ impl Mmu {
 					trap_type: TrapType::InstructionPageFault,
 					value: v_address,
 				})
-			}
-		}
-	}
-
-	/// Fetches instruction four bytes. This method takes virtual address
-	/// and translates into physical address inside.
-	///
-	/// # Arguments
-	/// * `v_address` Virtual address
-	pub fn fetch_word(&mut self, v_address: u64) -> Result<u32, Trap> {
-		let width = 4;
-		match (v_address & 0xfff) <= (0x1000 - width) {
-			true => {
-				// Fast path. All bytes fetched are in the same page so
-				// translating an address only once.
-				let effective_address = self.get_effective_address(v_address);
-				match self.translate_address(effective_address, &MemoryAccessType::Execute) {
-					Ok(p_address) => Ok(self.load_word_raw(p_address)),
-					Err(()) => Err(Trap {
-						trap_type: TrapType::InstructionPageFault,
-						value: effective_address,
-					}),
-				}
-			}
-			false => {
-				let mut data = 0 as u32;
-				for i in 0..width {
-					match self.fetch(v_address.wrapping_add(i)) {
-						Ok(byte) => data |= (byte as u32) << (i * 8),
-						Err(e) => return Err(e),
-					};
-				}
-				Ok(data)
 			}
 		}
 	}
@@ -225,19 +243,454 @@ impl Mmu {
 		}
 	}
 
-	/// Loads an byte. This method takes virtual address and translates
-	/// into physical address inside.
+	/// Fetches instruction four bytes. This method takes virtual address
+	/// and translates into physical address inside.
+	///
+	/// @TODO: Seperate I$
 	///
 	/// # Arguments
 	/// * `v_address` Virtual address
-	pub fn load(&mut self, v_address: u64) -> Result<u8, Trap> {
-		let effective_address = self.get_effective_address(v_address);
-		match self.translate_address(effective_address, &MemoryAccessType::Read) {
-			Ok(p_address) => Ok(self.load_raw(p_address)),
-			Err(()) => Err(Trap {
-				trap_type: TrapType::LoadPageFault,
-				value: v_address,
-			}),
+	pub fn fetch_word(&mut self, v_address: u64) -> Result<u32, Trap> {
+		let width = 4;
+		match (v_address & 0xfff) <= (0x1000 - width) {
+			true => {
+				// Fast path. All bytes fetched are in the same page so
+				// translating an address only once.
+				let effective_address = self.get_effective_address(v_address);
+				match self.translate_address(effective_address, &MemoryAccessType::Execute) {
+					Ok(p_address) => Ok(self.load_word_raw(p_address)),
+					Err(()) => Err(Trap {
+						trap_type: TrapType::InstructionPageFault,
+						value: effective_address,
+					}),
+				}
+			}
+			false => {
+				let mut data = 0 as u32;
+				for i in 0..width {
+					match self.fetch(v_address.wrapping_add(i)) {
+						Ok(byte) => data |= (byte as u32) << (i * 8),
+						Err(e) => return Err(e),
+					};
+				}
+				Ok(data)
+			}
+		}
+	}
+
+	/// Write back method for L1 cache
+	///
+	/// # Arguments
+	/// * `victim_cache_line`: the line needs to be written back
+	/// * `index`: index of the line
+	fn l1_write_back(&mut self, victim_cache_line: L1CacheLine, l1_index: u64) {
+		let mut write_back_address = 0 as u64;
+		// [ tag | index | 000000 ]
+		write_back_address = write_back_address
+			| (victim_cache_line.tag << (L1_CACHE_INDEX_BITS + L1_CACHE_OFFSET_BITS))
+			| (l1_index << L1_CACHE_OFFSET_BITS);
+
+		// Write back to L2
+		// Latency for checking
+		self.clock = self.clock.wrapping_add(L1_CACHE_HIT_LATENCY as u64);
+		// Latency for checking
+		self.clock = self.clock.wrapping_add(L2_CACHE_HIT_LATENCY as u64);
+		match self.l2_cache.read_line_info(write_back_address) {
+			Ok(l2_way) => {
+				let l2_index: u64 =
+					(write_back_address >> L2_CACHE_OFFSET_BITS) & ((1 << L2_CACHE_INDEX_BITS) - 1);
+				self.l2_cache.data[l2_index as usize].data[l2_way as usize].data_blocks =
+					victim_cache_line.data_blocks;
+				self.l2_cache.data[l2_index as usize].data[l2_way as usize].l1_inclusive = false;
+			}
+			_ => {}
+		}
+	}
+
+	/// Allocate a new L1 entry
+	/// with returning the allocated way index
+	///
+	/// # Arguments
+	/// * `index`: physical address
+	fn l1_miss_handler(&mut self, index: u64) -> Result<u64, ()> {
+		// let index: u64 = (index >> L1_CACHE_OFFSET_BITS) & ((1 << L1_CACHE_INDEX_BITS) - 1);
+		let way = self
+			.l1_cache
+			.allocate_new_line(index, PlacementPolicy::Random);
+		let victim = self.l1_cache.data[index as usize].data[way as usize];
+
+		// Detect victim cache line
+		// write back the victim
+		match victim.valid {
+			true => {
+				self.l1_write_back(victim, index);
+				// Latency for checking
+				self.clock = self.clock.wrapping_add(L1_CACHE_HIT_LATENCY as u64);
+			}
+			false => {
+				// Latency for checking
+				self.clock = self.clock.wrapping_add(L1_CACHE_HIT_LATENCY as u64);
+			}
+		}
+
+		Ok(way as u64)
+	}
+
+	/// Refill a line to L1 cache after allocation and writing back
+	/// Modified downward interface of L1
+	///
+	/// # Arguments
+	/// * `index`: pre-parsed index for the p_address
+	/// * `way`: allocated way in L1 cache
+	/// * `cache_line` : target cache line
+	pub fn l1_refill(&mut self, index: u64, way: u64, cache_line: L1CacheLine) -> Result<(), ()> {
+		// Place the line
+		#[cfg(feature = "debug-cache")]
+		println!(
+			"refill L1[{}][{}]: {:x?}",
+			index, way, cache_line.data_blocks
+		);
+		self.l1_cache.data[index as usize].data[way as usize] = cache_line;
+		self.l1_cache.data[index as usize].data[way as usize].valid = true;
+		Ok(())
+	}
+
+	/// Flush L1 cache
+	/// (e.g. FENCE)
+	pub fn l1_flush(&mut self) {
+		for index in 0..L1_CACHE_SET_NUMBER {
+			for way in 0..L1_SET_ASSOCIATIVE_WAY {
+				if self.l1_cache.data[index as usize].data[way as usize].valid == true {
+					// invalid
+					self.l1_cache.data[index as usize].data[way as usize].valid = false;
+					// write back
+					self.l1_write_back(
+						self.l1_cache.data[index as usize].data[way as usize],
+						index as u64,
+					);
+				}
+			}
+		}
+	}
+
+	/// Write back method for L2 cache
+	///
+	/// # Arguments
+	/// * `victim_cache_line`: the line needs to be written back
+	/// * `index`: index of the line
+	fn l2_write_back(&mut self, victim_cache_line: L2CacheLine, index: u64) {
+		let mut write_back_address = 0 as u64;
+		// [ tag | index | 000000 ]
+		write_back_address = write_back_address
+			| (victim_cache_line.tag << (L2_CACHE_INDEX_BITS + L2_CACHE_OFFSET_BITS))
+			| (index << L2_CACHE_OFFSET_BITS);
+
+		// Reuse current memory interface
+		// @TODO: optimize
+		for i in 0..(L2_CACHE_BLOCK_SIZE / 8) as u64 {
+			self.memory
+				.write_doubleword(write_back_address + i * 8, victim_cache_line.get(i * 8, 8));
+		}
+
+		// Latency for checking
+		self.clock = self.clock.wrapping_add(L2_CACHE_HIT_LATENCY as u64);
+
+		// Trace memory access
+		self.memory_access_trace.push(MemoryAccessTrace {
+			address: write_back_address,
+			operation: MemoryAccessType::Write,
+			cycle: self.clock,
+		});
+
+		#[cfg(feature = "dramsim")]
+		{
+			// Communicate with dramsim through pipe
+			// @TODO: Blocked
+			send_request(
+				format!("{:016x} {} {}", write_back_address, "WRITE", self.clock).as_str(),
+			);
+			#[cfg(feature = "debug-dramsim")]
+			println!(
+				"Send {:?}",
+				format!("{:016x} {} {}", write_back_address, "WRITE", self.clock)
+			);
+
+			let response_string = get_response();
+			#[cfg(feature = "debug-dramsim")]
+			println!("Resp {:?}", response_string);
+
+			// Latency for accessing memory
+			let dram_clk = response_string
+				.split(" ")
+				.last()
+				.unwrap()
+				.parse::<u64>()
+				.unwrap();
+			if dram_clk <= self.clock {
+				panic!("Reverse dram clk!!!");
+			} else {
+				self.dram_latency += dram_clk - self.clock;
+				self.clock = dram_clk;
+			}
+		}
+		#[cfg(not(feature = "dramsim"))]
+		{
+			self.clock = self.clock.wrapping_add(L2_CACHE_MISS_LATENCY as u64);
+		}
+	}
+
+	/// Allocate a new L2 entry
+	/// with returning the allocated way index
+	///
+	/// # Arguments
+	/// * `index`: physical address
+	fn l2_miss_handler(&mut self, index: u64) -> Result<u64, ()> {
+		// let index: u64 = (index >> L2_CACHE_OFFSET_BITS) & ((1 << L2_CACHE_INDEX_BITS) - 1);
+		let way = self
+			.l2_cache
+			.allocate_new_line(index, PlacementPolicy::Random);
+		let victim = self.l2_cache.data[index as usize].data[way as usize];
+
+		// Detect victim cache line
+		// write back the victim
+		match victim.valid {
+			true => {
+				self.l2_write_back(victim, index);
+				// Latency for checking
+				self.clock = self.clock.wrapping_add(L2_CACHE_HIT_LATENCY as u64);
+			}
+			false => {
+				// Latency for checking
+				self.clock = self.clock.wrapping_add(L2_CACHE_HIT_LATENCY as u64);
+			}
+		}
+
+		Ok(way as u64)
+	}
+
+	/// Refill a line to L2 cache after allocation and writing back
+	/// Modified downward interface of L2
+	///
+	/// # Arguments
+	/// * `index`: pre-parsed index for the p_address
+	/// * `way`: allocated way in L2 cache
+	/// * `cache_line` : target cache line
+	pub fn l2_refill(&mut self, index: u64, way: u64, cache_line: L2CacheLine) -> Result<(), ()> {
+		// Place the line
+		#[cfg(feature = "debug-cache")]
+		println!(
+			"refill L2[{}][{}]: {:x?}",
+			index, way, cache_line.data_blocks
+		);
+		self.l2_cache.data[index as usize].data[way as usize] = cache_line;
+		self.l2_cache.data[index as usize].data[way as usize].valid = true;
+		Ok(())
+	}
+
+	/// Flush L2 cache
+	/// (e.g. FENCE)
+	pub fn l2_flush(&mut self) {
+		for index in 0..L2_CACHE_SET_NUMBER {
+			for way in 0..L2_SET_ASSOCIATIVE_WAY {
+				if self.l2_cache.data[index as usize].data[way as usize].valid == true {
+					// invalid
+					self.l2_cache.data[index as usize].data[way as usize].valid = false;
+					// write back
+					self.l2_write_back(
+						self.l2_cache.data[index as usize].data[way as usize],
+						index as u64,
+					);
+				}
+			}
+		}
+	}
+
+	/// General memory subsystem interface
+	///
+	/// # Arguments
+	/// * `p_address` : p_address
+	fn aquire_cache_line(&mut self, p_address: u64) -> Result<u64, Trap> {
+		// pre-parse index
+		let l1_index: u64 = (p_address >> L1_CACHE_OFFSET_BITS) & ((1 << L1_CACHE_INDEX_BITS) - 1);
+		let l1_tag: u64 = p_address >> (L1_CACHE_INDEX_BITS + L1_CACHE_OFFSET_BITS);
+
+		match self.l1_cache.read_line_info(p_address) {
+			Ok(l1_way) => {
+				// L1 hit
+				self.clock = self.clock.wrapping_add(L1_CACHE_HIT_LATENCY as u64);
+				self.l1_cache.hit_num += 1;
+				Ok(l1_way)
+			}
+			Err(()) => {
+				// L1 miss
+
+				// Performance counter
+				self.l1_cache.miss_num += 1;
+
+				// pre-parse index
+				let l2_index: u64 =
+					(p_address >> L2_CACHE_OFFSET_BITS) & ((1 << L2_CACHE_INDEX_BITS) - 1);
+				let l2_tag: u64 = p_address >> (L2_CACHE_INDEX_BITS + L2_CACHE_OFFSET_BITS);
+
+				// Allocate L1 entry
+				// Latency of L1 miss handler:
+				// Check: if no write back
+				// Check + Check_L2(must hit) + Check: if write back
+				let l1_way_allocated = self.l1_miss_handler(l1_index).unwrap();
+
+				// Aquire a new line
+				let mut new_line = L1CacheLine::new();
+
+				// Access L2 cache
+				match self.l2_cache.read_line_info(p_address) {
+					Ok(l2_way) => {
+						// L1 miss but L2 hit
+
+						// Performance counter
+						self.l2_cache.hit_num += 1;
+
+						// Latency for checking
+						self.clock = self.clock.wrapping_add(L2_CACHE_HIT_LATENCY as u64);
+
+						// Refill with hitted L2 line
+						new_line.data_blocks =
+							self.l2_cache.data[l2_index as usize].data[l2_way as usize].data_blocks;
+						new_line.valid = true;
+						new_line.tag = l1_tag;
+
+						match self.l1_refill(l1_index, l1_way_allocated, new_line) {
+							// Eventual returning value
+							// Only data_blocks interested
+							Ok(()) => {
+								self.l2_cache.data[l2_index as usize].data[l2_way as usize]
+									.l1_inclusive = true;
+								Ok(l1_way_allocated)
+							}
+							Err(()) => {
+								// @TODO: determine TrapType
+								Err(Trap {
+									trap_type: TrapType::LoadAccessFault,
+									value: p_address,
+								})
+							}
+						}
+					}
+					Err(()) => {
+						// L1 miss and L2 miss
+
+						// Performance counter
+						self.l2_cache.miss_num += 1;
+
+						// Access memory
+						// @TODO : optimize
+						// Align cache line
+						let p_address_aligned =
+							(p_address >> L1_CACHE_OFFSET_BITS) << L1_CACHE_OFFSET_BITS;
+
+						// Latency for misshandler:
+						// Check: if no write back
+						// Check + memory access + Check : if write back
+						let l2_way_allocated = self.l2_miss_handler(l2_index).unwrap();
+
+						// Access memory for new line
+						//
+						#[cfg(feature = "debug-cache")]
+						println!("refill from {:x}", p_address_aligned);
+						for i in 0..L1_CACHE_BLOCK_SIZE {
+							new_line.data_blocks[i as usize] =
+								self.load_raw(p_address_aligned + i as u64);
+						}
+
+						// Trace memory access
+						self.memory_access_trace.push(MemoryAccessTrace {
+							address: p_address_aligned,
+							operation: MemoryAccessType::Read,
+							cycle: self.clock,
+						});
+
+						#[cfg(feature = "dramsim")]
+						{
+							// Communicate with dramsim through pipe
+							// @TODO: Blocked
+							send_request(
+								format!("{:016x} {} {}", p_address_aligned, "READ", self.clock)
+									.as_str(),
+							);
+							#[cfg(feature = "debug-dramsim")]
+							println!(
+								"Send {:?}",
+								format!("{:016x} {} {}", p_address_aligned, "READ", self.clock)
+							);
+
+							let response_string = get_response();
+							#[cfg(feature = "debug-dramsim")]
+							println!("Resp {:?}", response_string);
+
+							// Latency for accessing memory
+							let dram_clk = response_string
+								.split(" ")
+								.last()
+								.unwrap()
+								.parse::<u64>()
+								.unwrap();
+							if dram_clk <= self.clock {
+								panic!("Reverse dram clk!!!");
+							} else {
+								self.dram_latency += dram_clk - self.clock;
+								self.clock = dram_clk;
+							}
+						}
+						#[cfg(not(feature = "dramsim"))]
+						{
+							// Latency for accessing memory
+							self.clock = self.clock.wrapping_add(L2_CACHE_MISS_LATENCY as u64);
+						}
+
+						// Refill L2 with new line
+						match self.l2_refill(
+							l2_index,
+							l2_way_allocated,
+							L2CacheLine {
+								l1_inclusive: true,
+								valid: true,
+								tag: l2_tag,
+								data_blocks: new_line.data_blocks,
+							},
+						) {
+							Ok(()) => {
+								// Refill L1 with new line
+								match self.l1_refill(
+									l1_index,
+									l1_way_allocated,
+									L1CacheLine {
+										valid: true,
+										tag: l1_tag,
+										data_blocks: new_line.data_blocks,
+									},
+								) {
+									// Eventual returning value
+									// Only data_blocks interested
+									Ok(()) => Ok(l1_way_allocated),
+									Err(()) => {
+										// @TODO: determine TrapType
+										Err(Trap {
+											trap_type: TrapType::LoadAccessFault,
+											value: p_address,
+										})
+									}
+								}
+							}
+							Err(()) => {
+								// @TODO: determine TrapType
+								Err(Trap {
+									trap_type: TrapType::LoadAccessFault,
+									value: p_address,
+								})
+							}
+						}
+					}
+				}
+			}
 		}
 	}
 
@@ -256,19 +709,22 @@ impl Mmu {
 		match (v_address & 0xfff) <= (0x1000 - width) {
 			true => match self.translate_address(v_address, &MemoryAccessType::Read) {
 				Ok(p_address) => {
-					// Fast path. All bytes fetched are in the same page so
-					// translating an address only once.
-					let p_address = match p_address > 0xffffffff00000000 {
-						true => p_address & 0x00000000ffffffff,
-						false => p_address,
+					#[cfg(feature = "debug-cache")]
+					println!("\nload {}bytes @ 0x{:x}", width, p_address);
+
+					// pre-parse index
+					let l1_index: u64 =
+						(p_address >> L1_CACHE_OFFSET_BITS) & ((1 << L1_CACHE_INDEX_BITS) - 1);
+					let _l1_tag: u64 = p_address >> (L1_CACHE_INDEX_BITS + L1_CACHE_OFFSET_BITS);
+					let l1_offset = p_address & ((1 << L1_CACHE_OFFSET_BITS) - 1);
+
+					let l1_way = match self.aquire_cache_line(p_address) {
+						Ok(l1_way) => l1_way,
+						Err(trap) => return Err(trap),
 					};
-					match width {
-						1 => Ok(self.load_raw(p_address) as u64),
-						2 => Ok(self.load_halfword_raw(p_address) as u64),
-						4 => Ok(self.load_word_raw(p_address) as u64),
-						8 => Ok(self.load_doubleword_raw(p_address)),
-						_ => panic!("Width must be 1, 2, 4, or 8. {:X}", width),
-					}
+
+					Ok(self.l1_cache.data[l1_index as usize].data[l1_way as usize]
+						.get(l1_offset, width))
 				}
 				Err(()) => Err(Trap {
 					trap_type: TrapType::LoadPageFault,
@@ -285,6 +741,18 @@ impl Mmu {
 				}
 				Ok(data)
 			}
+		}
+	}
+
+	/// Loads an byte. This method takes virtual address and translates
+	/// into physical address inside.
+	///
+	/// # Arguments
+	/// * `v_address` Virtual address
+	pub fn load(&mut self, v_address: u64) -> Result<u8, Trap> {
+		match self.load_bytes(v_address, 1) {
+			Ok(data) => Ok(data as u8),
+			Err(e) => Err(e),
 		}
 	}
 
@@ -324,25 +792,6 @@ impl Mmu {
 		}
 	}
 
-	/// Store an byte. This method takes virtual address and translates
-	/// into physical address inside.
-	///
-	/// # Arguments
-	/// * `v_address` Virtual address
-	/// * `value`
-	pub fn store(&mut self, v_address: u64, value: u8) -> Result<(), Trap> {
-		match self.translate_address(v_address, &MemoryAccessType::Write) {
-			Ok(p_address) => {
-				self.store_raw(p_address, value);
-				Ok(())
-			}
-			Err(()) => Err(Trap {
-				trap_type: TrapType::StorePageFault,
-				value: v_address,
-			}),
-		}
-	}
-
 	/// Stores multiple bytes. This method takes virtual address and translates
 	/// into physical address inside.
 	///
@@ -359,19 +808,30 @@ impl Mmu {
 		match (v_address & 0xfff) <= (0x1000 - width) {
 			true => match self.translate_address(v_address, &MemoryAccessType::Write) {
 				Ok(p_address) => {
-					// Fast path. All bytes fetched are in the same page so
-					// translating an address only once.
-					let p_address = match p_address > 0xffffffff00000000 {
-						true => p_address & 0x00000000ffffffff,
-						false => p_address,
+					// Store to cache
+					// @TODO: store buffer
+					// Get allocated cache line's way index
+					#[cfg(feature = "debug-cache")]
+					println!(
+						"\nstore 0x{:x} of {}bytes @ 0x{:x}",
+						value, width, p_address
+					);
+
+					// pre-parse index
+					let l1_index: u64 =
+						(p_address >> L1_CACHE_OFFSET_BITS) & ((1 << L1_CACHE_INDEX_BITS) - 1);
+					let _l1_tag: u64 = p_address >> (L1_CACHE_INDEX_BITS + L1_CACHE_OFFSET_BITS);
+					let l1_offset = p_address & ((1 << L1_CACHE_OFFSET_BITS) - 1);
+
+					let l1_way = match self.aquire_cache_line(p_address) {
+						Ok(l1_way) => l1_way,
+						Err(trap) => return Err(trap),
 					};
-					match width {
-						1 => self.store_raw(p_address, value as u8),
-						2 => self.store_halfword_raw(p_address, value as u16),
-						4 => self.store_word_raw(p_address, value as u32),
-						8 => self.store_doubleword_raw(p_address, value),
-						_ => panic!("Width must be 1, 2, 4, or 8. {:X}", width),
-					}
+
+					// Update cache line
+					self.l1_cache.data[l1_index as usize].data[l1_way as usize]
+						.set(l1_offset, width, value);
+
 					Ok(())
 				}
 				Err(()) => Err(Trap {
@@ -389,6 +849,16 @@ impl Mmu {
 				Ok(())
 			}
 		}
+	}
+
+	/// Store an byte. This method takes virtual address and translates
+	/// into physical address inside.
+	///
+	/// # Arguments
+	/// * `v_address` Virtual address
+	/// * `value`
+	pub fn store(&mut self, v_address: u64, value: u8) -> Result<(), Trap> {
+		self.store_bytes(v_address, value as u64, 1)
 	}
 
 	/// Stores two bytes. This method takes virtual address and translates
@@ -514,7 +984,7 @@ impl Mmu {
 	/// # Arguments
 	/// * `p_address` Physical address
 	/// * `value` data written
-	fn store_halfword_raw(&mut self, p_address: u64, value: u16) {
+	fn _store_halfword_raw(&mut self, p_address: u64, value: u16) {
 		let effective_address = self.get_effective_address(p_address);
 		match effective_address >= DRAM_BASE
 			&& effective_address.wrapping_add(1) > effective_address
@@ -562,7 +1032,7 @@ impl Mmu {
 	/// # Arguments
 	/// * `p_address` Physical address
 	/// * `value` data written
-	fn store_doubleword_raw(&mut self, p_address: u64, value: u64) {
+	pub fn store_doubleword_raw(&mut self, p_address: u64, value: u64) {
 		let effective_address = self.get_effective_address(p_address);
 		match effective_address >= DRAM_BASE
 			&& effective_address.wrapping_add(7) > effective_address
@@ -612,8 +1082,12 @@ impl Mmu {
 		access_type: &MemoryAccessType,
 	) -> Result<u64, ()> {
 		let address = self.get_effective_address(v_address);
+		// println!("detecter VADDR={}", address);
 		let p_address = match self.addressing_mode {
-			AddressingMode::None => Ok(address),
+			AddressingMode::None => {
+				// println!("AddressingMode==NONE");
+				Ok(address)
+			}
 			AddressingMode::SV32 => match self.privilege_mode {
 				// @TODO: Optimize
 				PrivilegeMode::Machine => match access_type {
@@ -638,7 +1112,7 @@ impl Mmu {
 				},
 				PrivilegeMode::User | PrivilegeMode::Supervisor => {
 					let vpns = [(address >> 12) & 0x3ff, (address >> 22) & 0x3ff];
-					self.traverse_page(address, 2 - 1, self.ppn, &vpns, &access_type)
+					self.tlb_or_pagewalk(address, 2 - 1, self.ppn, &vpns, &access_type)
 				}
 				_ => Ok(address),
 			},
@@ -646,11 +1120,18 @@ impl Mmu {
 				// @TODO: Optimize
 				// @TODO: Remove duplicated code with SV32
 				PrivilegeMode::Machine => match access_type {
-					MemoryAccessType::Execute => Ok(address),
+					MemoryAccessType::Execute => {
+						// println!("AddressingMode=SV39 Machine Execute");
+						Ok(address)
+					}
 					// @TODO: Remove magic number
 					_ => match (self.mstatus >> 17) & 1 {
-						0 => Ok(address),
+						0 => {
+							// println!("AddressingMode=SV39 Machine else mstatus 17bit=1");
+							Ok(address)
+						}
 						_ => {
+							// println!("AddressingMode=SV39 Machine else mstatus 17bit!=1");
 							let privilege_mode = get_privilege_mode((self.mstatus >> 9) & 3);
 							match privilege_mode {
 								PrivilegeMode::Machine => Ok(address),
@@ -671,7 +1152,8 @@ impl Mmu {
 						(address >> 21) & 0x1ff,
 						(address >> 30) & 0x1ff,
 					];
-					self.traverse_page(address, 3 - 1, self.ppn, &vpns, &access_type)
+					// println!("AddressingMode=SV39 user");
+					self.tlb_or_pagewalk(address, 3 - 1, self.ppn, &vpns, &access_type)
 				}
 				_ => Ok(address),
 			},
@@ -679,13 +1161,103 @@ impl Mmu {
 				panic!("AddressingMode SV48 is not supported yet.");
 			}
 		};
+		// match p_address {
+		// 	Ok(address) => {
+		// 		// println!("detecter PADDR={}", p_address.unwrap());
+		// 	}
+		// 	_ => {
+		// 		println!("ERROR: at translate_address paddr==err(())");
+		// 	}
+		// }
 		p_address
 	}
 
-	fn traverse_page(
+	fn tlb_entry_search(&mut self, vpns: u64) -> usize {
+		let mask = match self.addressing_mode {
+			AddressingMode::SV32 => ((1 << 12) - 1) ^ ((1 << 32) - 1),
+			_ => ((1 << 12) - 1) ^ ((1 << 39) - 1),
+		};
+
+		for i in 0..TLB_ENTRY_NUM {
+			/*
+			if self.tlb_tag[i] & 1 == 1 {
+				return i;
+			}
+			*/
+			if (vpns & mask) == (self.tlb_tag[i] & mask) {
+				// hit !
+				return i;
+			}
+		}
+		return TLB_ENTRY_NUM + 1;
+	}
+
+	fn tlb_entry_avaliable(&mut self, vpns: u64) -> bool {
+		let i: usize = self.tlb_entry_search(vpns);
+		if i > TLB_ENTRY_NUM {
+			return false;
+		} else {
+			return (self.tlb_tag[i] & 1) == 1;
+		}
+	}
+
+	fn tlb_bitnum_increased(&mut self, i: usize) {
+		if self.tlb_tag[i] & 2 != 2 {
+			self.tlb_tag[i] = self.tlb_tag[i] | 2; // bit PLRU algorithm
+			self.tlb_bitnum = self.tlb_bitnum + 1;
+			if self.tlb_bitnum == TLB_ENTRY_NUM {
+				for j in 0..TLB_ENTRY_NUM {
+					self.tlb_tag[j] = self.tlb_tag[j] & (!(2 as u64))
+				}
+				self.tlb_bitnum = 0;
+			}
+		}
+	}
+
+	fn tlb_get_entry(&mut self, vpns: u64) -> u64 {
+		let i: usize = self.tlb_entry_search(vpns);
+		self.tlb_bitnum_increased(i);
+		//println!("tlb_get_entry: id={},tag[id]={},value[id]={}",i,self.tlb_tag[i],self.tlb_value[i]);
+		self.tlb_value[i]
+	}
+
+	fn tlb_update_entry(&mut self, vpns: u64, new_pte: u64) {
+		let i: usize = self.tlb_entry_search(vpns);
+		if i == TLB_ENTRY_NUM + 1 {
+			// find if exist free entry
+			for j in 0..TLB_ENTRY_NUM {
+				if self.tlb_tag[j] & 1 == 0 {
+					// found free entry
+					self.tlb_tag[j] = vpns | 1;
+					self.tlb_value[j] = new_pte;
+					//println!("tlb_update_entry: id={},tag[id]={},value[id]={}",j,self.tlb_tag[j],self.tlb_value[j]);
+					self.tlb_bitnum_increased(j);
+					return;
+				}
+			}
+			// no free entry, select a victim
+			for j in 0..TLB_ENTRY_NUM {
+				if self.tlb_tag[j] & 2 == 0 {
+					// found victim, swap it
+					self.tlb_tag[j] = vpns | 1;
+					self.tlb_value[j] = new_pte;
+					//println!("tlb_update_entry: id={},tag[id]={},value[id]={}",j,self.tlb_tag[j],self.tlb_value[j]);
+					self.tlb_bitnum_increased(j);
+					return;
+				}
+			}
+			// no victim
+			println!(
+				"tlb_update_entry error: no free slot or victim, this situation shouldnt occur!"
+			);
+			panic!();
+		}
+	}
+
+	fn tlb_or_pagewalk(
 		&mut self,
 		v_address: u64,
-		level: u8,
+		mut level: u8,
 		parent_ppn: u64,
 		vpns: &[u64],
 		access_type: &MemoryAccessType,
@@ -696,9 +1268,53 @@ impl Mmu {
 			_ => 8,
 		};
 		let pte_address = parent_ppn * pagesize + vpns[level as usize] * ptesize;
+		let vpn = match self.addressing_mode {
+			AddressingMode::SV32 => (vpns[0] << 12) | (vpns[1] << 22),
+			AddressingMode::SV39 => (vpns[0] << 12) | (vpns[1] << 21) | (vpns[2] << 30),
+			_ => (vpns[0] << 12) | (vpns[1] << 21) | (vpns[2] << 30),
+		} as u64;
 		let pte = match self.addressing_mode {
-			AddressingMode::SV32 => self.load_word_raw(pte_address) as u64,
-			_ => self.load_doubleword_raw(pte_address),
+			AddressingMode::SV32 => match self.tlb_entry_avaliable(vpn) {
+				true => {
+					let tmp = self.tlb_get_entry(vpn);
+					level = (tmp >> 60) as u8;
+					tmp
+				}
+				_ => {
+					let tmp = self.load_word_raw(pte_address) as u64;
+					let tmp_x = (tmp >> 3) & 1;
+					let tmp_w = (tmp >> 2) & 1;
+					let tmp_r = (tmp >> 1) & 1;
+					if tmp_x != 0 || tmp_r != 0 || tmp_w != 0 {
+						// a leaf PTE
+						self.tlb_update_entry(vpn, tmp | ((level as u64) << 60));
+					}
+					tmp
+				}
+			},
+			_ => {
+				if ENABLE_TLB == true {
+					match self.tlb_entry_avaliable(vpn) {
+						true => {
+							let tmp = self.tlb_get_entry(vpn);
+							level = (tmp >> 60) as u8;
+							tmp
+						}
+						_ => {
+							let tmp = self.load_doubleword_raw(pte_address);
+							let tmp_x = (tmp >> 3) & 1;
+							let tmp_w = (tmp >> 2) & 1;
+							let tmp_r = (tmp >> 1) & 1;
+							if tmp_x != 0 || tmp_r != 0 || tmp_w != 0 {
+								self.tlb_update_entry(vpn, tmp | ((level as u64) << 60));
+							}
+							tmp
+						}
+					}
+				} else {
+					self.load_doubleword_raw(pte_address)
+				}
+			}
 		};
 		let ppn = match self.addressing_mode {
 			AddressingMode::SV32 => (pte >> 10) & 0x3fffff,
@@ -722,7 +1338,6 @@ impl Mmu {
 		let w = (pte >> 2) & 1;
 		let r = (pte >> 1) & 1;
 		let v = pte & 1;
-
 		// println!("VA:{:X} Level:{:X} PTE_AD:{:X} PTE:{:X} PPPN:{:X} PPN:{:X} PPN1:{:X} PPN0:{:X}", v_address, level, pte_address, pte, parent_ppn, ppn, ppns[1], ppns[0]);
 
 		if v == 0 || (r == 0 && w == 1) {
@@ -732,7 +1347,7 @@ impl Mmu {
 		if r == 0 && x == 0 {
 			return match level {
 				0 => Err(()),
-				_ => self.traverse_page(v_address, level - 1, ppn, vpns, access_type),
+				_ => self.tlb_or_pagewalk(v_address, level - 1, ppn, vpns, access_type),
 			};
 		}
 

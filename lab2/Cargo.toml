@@ -1,0 +1,23 @@
+[package]
+name = "lab2"
+version = "0.1.0"
+authors = ["chaoRIOS <chao.w@rioslab.org>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+getopts = "0.2"
+riscv_emu_rust = {path = "../" ,default-features = false, optional = true}
+lab1 = {path = "../lab1"}
+
+[features]
+default = ["riscv_emu_rust"]
+dramsim = ["riscv_emu_rust","riscv_emu_rust/dramsim"]
+memdump = ["riscv_emu_rust","riscv_emu_rust/memdump"]
+
+debug = ["debug-cache", "debug-dramsim", "debug-disassemble", "debug-tohost"]
+debug-cache = ["riscv_emu_rust","riscv_emu_rust/debug-cache"]
+debug-dramsim = ["dramsim","riscv_emu_rust","riscv_emu_rust/debug-dramsim"]
+debug-disassemble = ["riscv_emu_rust","riscv_emu_rust/debug-disassemble"]
+debug-tohost = ["riscv_emu_rust","riscv_emu_rust/debug-tohost"]
