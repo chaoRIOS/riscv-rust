@@ -252,7 +252,7 @@ impl Emulator {
 	/// * `data` Program binary
 	// @TODO: Make ElfAnalyzer and move the core logic there.
 	// @TODO: Returns `Err` if the passed contend doesn't seem ELF file
-	pub fn setup_program(&mut self, data: Vec<u8>, memdump_contents: Vec<u8>) {
+	pub fn setup_program(&mut self, data: Vec<u8>, _memdump_contents: Vec<u8>) {
 		let analyzer = ElfAnalyzer::new(data);
 
 		if !analyzer.validate() {
@@ -322,20 +322,22 @@ impl Emulator {
 			loop {
 				let mut left_addr: u64 = 0;
 				{
-					while memdump_contents[iter_num] != 'x' as u8 {
+					while _memdump_contents[iter_num] != 'x' as u8 {
 						iter_num = iter_num + 1;
 					}
-					for j in iter_num + 1..memdump_contents.len() {
-						if memdump_contents[j] == 32 || memdump_contents[j] == 10 {
+					for j in iter_num + 1.._memdump_contents.len() {
+						if _memdump_contents[j] == 32 || _memdump_contents[j] == 10 {
 							iter_num = j;
 							break;
 						} else {
-							let mut tmp = memdump_contents[j];
-							if memdump_contents[j] >= 'a' as u8 && memdump_contents[j] <= 'f' as u8
+							let mut tmp = _memdump_contents[j];
+							if _memdump_contents[j] >= 'a' as u8
+								&& _memdump_contents[j] <= 'f' as u8
 							{
 								tmp = tmp - 'a' as u8 + 10 + 48;
 							}
-							if memdump_contents[j] >= 'A' as u8 && memdump_contents[j] <= 'F' as u8
+							if _memdump_contents[j] >= 'A' as u8
+								&& _memdump_contents[j] <= 'F' as u8
 							{
 								tmp = tmp - 'A' as u8 + 10 + 48;
 							}
@@ -345,20 +347,22 @@ impl Emulator {
 				}
 				let mut right_value: u64 = 0;
 				{
-					while memdump_contents[iter_num] != ' ' as u8 {
+					while _memdump_contents[iter_num] != ' ' as u8 {
 						iter_num = iter_num + 1;
 					}
-					for j in iter_num + 1..memdump_contents.len() {
-						if memdump_contents[j] == 32 || memdump_contents[j] == 10 {
+					for j in iter_num + 1.._memdump_contents.len() {
+						if _memdump_contents[j] == 32 || _memdump_contents[j] == 10 {
 							iter_num = j;
 							break;
 						} else {
-							let mut tmp = memdump_contents[j];
-							if memdump_contents[j] >= 'a' as u8 && memdump_contents[j] <= 'f' as u8
+							let mut tmp = _memdump_contents[j];
+							if _memdump_contents[j] >= 'a' as u8
+								&& _memdump_contents[j] <= 'f' as u8
 							{
 								tmp = tmp - 'a' as u8 + 10 + 48;
 							}
-							if memdump_contents[j] >= 'A' as u8 && memdump_contents[j] <= 'F' as u8
+							if _memdump_contents[j] >= 'A' as u8
+								&& _memdump_contents[j] <= 'F' as u8
 							{
 								tmp = tmp - 'A' as u8 + 10 + 48;
 							}
@@ -371,7 +375,7 @@ impl Emulator {
 					.get_mut_mmu()
 					.store_doubleword_raw(left_addr, right_value);
 				iter_num = iter_num + 1;
-				if iter_num >= memdump_contents.len() {
+				if iter_num >= _memdump_contents.len() {
 					break;
 				}
 			}

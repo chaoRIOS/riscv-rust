@@ -14,10 +14,10 @@ exclude = [
 ]
 
 [workspace]
-members = [".", "lab1", "lab2"]
+members = [".", "lab1", "lab2", "lab3"]
 
 [features]
-
+default = []
 dramsim = []
 memdump = []
 
