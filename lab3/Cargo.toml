@@ -13,3 +13,4 @@ lab1 = {path = "../lab1"}
 
 [features]
 default = ["riscv_emu_rust"]
+debug-disassemble = ["riscv_emu_rust","riscv_emu_rust/debug-disassemble"]
