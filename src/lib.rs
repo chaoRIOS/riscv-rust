@@ -6,7 +6,6 @@ extern crate fnv;
 extern crate rand;
 
 use self::fnv::FnvHashMap;
-use std::collections::HashMap;
 use std::process;
 use std::str;
 use std::time::SystemTime;
@@ -31,10 +30,6 @@ use dram::{send_request, terminate_pipe};
 use elf_analyzer::ElfAnalyzer;
 use l1cache::L1_CACHE_HIT_LATENCY;
 use l2cache::L2_CACHE_HIT_LATENCY;
-use pkg::{
-	COSIM_INSTRUCTIONS, COSIM_INSTRUCTIONS_FORMAT, COSIM_INSTRUCTIONS_FU_OP,
-	COSIM_INSTRUCTIONS_FU_T,
-};
 
 /// RISC-V emulator. It emulates RISC-V CPU and peripheral devices.
 ///
@@ -54,9 +49,6 @@ pub struct Emulator {
 
 	/// Stores mapping from symbol to virtual address
 	pub symbol_map: FnvHashMap<String, u64>,
-	pub format_map: HashMap<String, String>,
-	pub fu_map: HashMap<String, usize>,
-	pub op_map: HashMap<String, u8>,
 
 	/// [`riscv-tests`](https://github.com/riscv/riscv-tests) program specific
 	/// properties. Whether the program set by `setup_program()` is
@@ -78,10 +70,6 @@ impl Emulator {
 			cpu: Cpu::new(),
 
 			symbol_map: FnvHashMap::default(),
-
-			format_map: HashMap::default(),
-			fu_map: HashMap::default(),
-			op_map: HashMap::default(),
 
 			// These can be updated in setup_program()
 			is_test: false,
@@ -303,18 +291,6 @@ impl Emulator {
 				self.symbol_map
 					.insert(key.to_string(), *map.get(key).unwrap());
 			}
-		}
-
-		// Create map for instructions and functional units
-		for i in 0..COSIM_INSTRUCTIONS.len() {
-			let instr: &str = COSIM_INSTRUCTIONS[i];
-			let format: &str = COSIM_INSTRUCTIONS_FORMAT[i];
-			let fu: usize = COSIM_INSTRUCTIONS_FU_T[i].clone();
-			let op: u8 = COSIM_INSTRUCTIONS_FU_OP[i].clone();
-			self.format_map
-				.insert(String::from(instr), String::from(format));
-			self.fu_map.insert(String::from(instr), fu);
-			self.op_map.insert(String::from(instr), op);
 		}
 
 		// Detected whether the elf file is riscv-tests.

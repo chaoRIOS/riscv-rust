@@ -41,6 +41,7 @@ pub struct Mmu {
 	pub tlb_value: [u64; TLB_ENTRY_NUM],
 	pub tlb_bitnum: usize,
 
+	pub mmu_latency: u64,
 	pub dram_latency: u64,
 }
 
@@ -97,6 +98,7 @@ impl Mmu {
 			tlb_value: [0; TLB_ENTRY_NUM],
 			tlb_bitnum: 0,
 
+			mmu_latency: 0,
 			dram_latency: 0,
 		}
 	}
@@ -706,6 +708,9 @@ impl Mmu {
 			"Width must be 1, 2, 4, or 8. {:X}",
 			width
 		);
+
+		self.mmu_latency = self.clock;
+
 		match (v_address & 0xfff) <= (0x1000 - width) {
 			true => match self.translate_address(v_address, &MemoryAccessType::Read) {
 				Ok(p_address) => {
@@ -722,6 +727,8 @@ impl Mmu {
 						Ok(l1_way) => l1_way,
 						Err(trap) => return Err(trap),
 					};
+
+					self.mmu_latency = self.clock - self.mmu_latency;
 
 					Ok(self.l1_cache.data[l1_index as usize].data[l1_way as usize]
 						.get(l1_offset, width))
@@ -805,6 +812,9 @@ impl Mmu {
 			"Width must be 1, 2, 4, or 8. {:X}",
 			width
 		);
+
+		self.mmu_latency = self.clock;
+
 		match (v_address & 0xfff) <= (0x1000 - width) {
 			true => match self.translate_address(v_address, &MemoryAccessType::Write) {
 				Ok(p_address) => {
@@ -827,6 +837,8 @@ impl Mmu {
 						Ok(l1_way) => l1_way,
 						Err(trap) => return Err(trap),
 					};
+
+					self.mmu_latency = self.clock - self.mmu_latency;
 
 					// Update cache line
 					self.l1_cache.data[l1_index as usize].data[l1_way as usize]
