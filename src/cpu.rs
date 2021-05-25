@@ -73,11 +73,11 @@ pub struct Cpu {
 	pub clock: u64,
 
 	// RV32/64 indicator
-	pub unsigned_data_mask: u64,
-	pub xlen: Xlen,
+	unsigned_data_mask: u64,
+	xlen: Xlen,
 
-	pub privilege_mode: PrivilegeMode,
-	pub wfi: bool,
+	privilege_mode: PrivilegeMode,
+	wfi: bool,
 
 	// using only lower 32bits of x, pc, and csr registers
 	// for 32-bit mode
@@ -86,7 +86,7 @@ pub struct Cpu {
 	pub pc: u64,
 	pub csr: [u64; CSR_CAPACITY],
 
-	pub instruction_buffer: Option<VecDeque<u32>>,
+	pub instruction_buffer: VecDeque<u32>,
 
 	// Calculating facilities for OOO execution
 	pub renaming_table: [[u64; 2]; GPR_CAPACITY],
@@ -97,8 +97,8 @@ pub struct Cpu {
 	pub mmu: Mmu,
 
 	// Atomic facilities
-	pub reservation: u64, // @TODO: Should support multiple address reservations
-	pub is_reservation_set: bool,
+	reservation: u64, // @TODO: Should support multiple address reservations
+	is_reservation_set: bool,
 
 	// Tohost address
 	pub tohost_addr: u64,
@@ -256,7 +256,7 @@ impl Cpu {
 			x: [0; 32],
 			f: [0.0; 32],
 			pc: 0,
-			instruction_buffer: Some(VecDeque::with_capacity(INSTUCTION_BUFFER_CAPACITY)),
+			instruction_buffer: VecDeque::with_capacity(INSTUCTION_BUFFER_CAPACITY),
 
 			renaming_table: [[0; 2]; 32],
 			function_unit_table: [0; 7],
@@ -348,6 +348,8 @@ impl Cpu {
 				return;
 			}
 		};
+
+		self.instruction_buffer.push_back(word);
 
 		let decode_result = self.decode(word, instruction_address);
 

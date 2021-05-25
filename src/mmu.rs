@@ -24,10 +24,10 @@ pub const TLB_ENTRY_NUM: usize = 64;
 
 pub struct Mmu {
 	pub clock: u64,
-	pub xlen: Xlen,
-	pub ppn: u64,
-	pub addressing_mode: AddressingMode,
-	pub privilege_mode: PrivilegeMode,
+	xlen: Xlen,
+	ppn: u64,
+	addressing_mode: AddressingMode,
+	privilege_mode: PrivilegeMode,
 	pub memory: MemoryWrapper,
 	pub l1_cache: L1Cache,
 	pub l2_cache: L2Cache,
@@ -1427,7 +1427,7 @@ impl Mmu {
 /// [`Memory`](../memory/struct.Memory.html) wrapper. Converts physical address to the one in memory
 /// using [`DRAM_BASE`](constant.DRAM_BASE.html) and accesses [`Memory`](../memory/struct.Memory.html).
 pub struct MemoryWrapper {
-	pub memory: Memory,
+	memory: Memory,
 }
 
 impl MemoryWrapper {

@@ -2,7 +2,7 @@ extern crate getopts;
 extern crate riscv_emu_rust;
 
 use riscv_emu_rust::cpu::Xlen;
-use riscv_emu_rust::pkg::EMULATOR;
+use riscv_emu_rust::Emulator;
 
 use getopts::Options;
 use std::env;
@@ -13,11 +13,11 @@ fn run_elf(input_path: &str) -> std::io::Result<()> {
 	let mut elf_file = File::open(input_path)?;
 	let mut elf_contents = vec![];
 	elf_file.read_to_end(&mut elf_contents)?;
-	unsafe {
-		EMULATOR.setup_program(elf_contents, vec![]);
-		EMULATOR.update_xlen(Xlen::Bit64);
-		EMULATOR.run_program(false, "");
-	}
+
+	let mut emulator = Emulator::new();
+	emulator.setup_program(elf_contents, vec![]);
+	emulator.update_xlen(Xlen::Bit64);
+	emulator.run_program(false, "");
 	Ok(())
 }
 

@@ -7,7 +7,6 @@ extern crate rand;
 
 use self::fnv::FnvHashMap;
 use std::collections::HashMap;
-use std::collections::VecDeque;
 use std::process;
 use std::str;
 use std::time::SystemTime;
@@ -25,7 +24,7 @@ pub mod rob;
 
 use cpu::{
 	Cpu, Xlen, CSR_HPMCOUNTER3_ADDRESS, CSR_HPMCOUNTER4_ADDRESS, CSR_HPMCOUNTER5_ADDRESS,
-	CSR_HPMCOUNTER6_ADDRESS, CSR_MCYCLE_ADDRESS, INSTUCTION_BUFFER_CAPACITY,
+	CSR_HPMCOUNTER6_ADDRESS, CSR_MCYCLE_ADDRESS,
 };
 #[cfg(feature = "dramsim")]
 use dram::{send_request, terminate_pipe};
@@ -54,10 +53,10 @@ pub struct Emulator {
 	pub cpu: Cpu,
 
 	/// Stores mapping from symbol to virtual address
-	pub symbol_map: Option<FnvHashMap<String, u64>>,
-	pub format_map: Option<HashMap<String, String>>,
-	pub fu_map: Option<HashMap<String, usize>>,
-	pub op_map: Option<HashMap<String, u8>>,
+	pub symbol_map: FnvHashMap<String, u64>,
+	pub format_map: HashMap<String, String>,
+	pub fu_map: HashMap<String, usize>,
+	pub op_map: HashMap<String, u8>,
 
 	/// [`riscv-tests`](https://github.com/riscv/riscv-tests) program specific
 	/// properties. Whether the program set by `setup_program()` is
@@ -78,10 +77,11 @@ impl Emulator {
 		Emulator {
 			cpu: Cpu::new(),
 
-			symbol_map: Some(FnvHashMap::default()),
-			format_map: Some(HashMap::default()),
-			fu_map: Some(HashMap::default()),
-			op_map: Some(HashMap::default()),
+			symbol_map: FnvHashMap::default(),
+
+			format_map: HashMap::default(),
+			fu_map: HashMap::default(),
+			op_map: HashMap::default(),
 
 			// These can be updated in setup_program()
 			is_test: false,
@@ -299,29 +299,23 @@ impl Emulator {
 			// Assuming symbols are in the first string table section.
 			// @TODO: What if symbol can be in the second or later string table sections?
 			let map = analyzer.create_symbol_map(&entries, &string_table_section_headers[0]);
-			let mut _symbol_map = FnvHashMap::default();
 			for key in map.keys() {
-				_symbol_map.insert(key.to_string(), *map.get(key).unwrap());
+				self.symbol_map
+					.insert(key.to_string(), *map.get(key).unwrap());
 			}
-			self.symbol_map = Some(_symbol_map);
 		}
 
-		let mut format_map: HashMap<String, String> = HashMap::default();
-		let mut fu_map: HashMap<String, usize> = HashMap::default();
-		let mut op_map: HashMap<String, u8> = HashMap::default();
+		// Create map for instructions and functional units
 		for i in 0..COSIM_INSTRUCTIONS.len() {
-			let mut _instr: &str = COSIM_INSTRUCTIONS[i];
-			let mut _format: &str = COSIM_INSTRUCTIONS_FORMAT[i];
-			let mut _fu: usize = COSIM_INSTRUCTIONS_FU_T[i].clone();
-			let mut _op: u8 = COSIM_INSTRUCTIONS_FU_OP[i].clone();
-			format_map.insert(String::from(_instr), String::from(_format));
-			fu_map.insert(String::from(_instr), _fu);
-			op_map.insert(String::from(_instr), _op);
+			let instr: &str = COSIM_INSTRUCTIONS[i];
+			let format: &str = COSIM_INSTRUCTIONS_FORMAT[i];
+			let fu: usize = COSIM_INSTRUCTIONS_FU_T[i].clone();
+			let op: u8 = COSIM_INSTRUCTIONS_FU_OP[i].clone();
+			self.format_map
+				.insert(String::from(instr), String::from(format));
+			self.fu_map.insert(String::from(instr), fu);
+			self.op_map.insert(String::from(instr), op);
 		}
-		self.format_map = Some(format_map);
-		self.fu_map = Some(fu_map);
-		self.op_map = Some(op_map);
-		self.cpu.instruction_buffer = Some(VecDeque::with_capacity(INSTUCTION_BUFFER_CAPACITY));
 
 		// Detected whether the elf file is riscv-tests.
 		// Setting up CPU and Memory depending on it.
