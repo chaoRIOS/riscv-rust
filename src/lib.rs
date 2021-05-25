@@ -19,6 +19,7 @@ pub mod l1cache;
 pub mod l2cache;
 pub mod memory;
 pub mod mmu;
+pub mod rob;
 
 use cpu::{
 	Cpu, Xlen, CSR_HPMCOUNTER3_ADDRESS, CSR_HPMCOUNTER4_ADDRESS, CSR_HPMCOUNTER5_ADDRESS,
@@ -49,7 +50,7 @@ pub struct Emulator {
 	/// Stores mapping from symbol to virtual address
 	pub symbol_map: Option<FnvHashMap<String, u64>>,
 	pub format_map: Option<HashMap<String, String>>,
-	pub fu_map: Option<HashMap<String, u8>>,
+	pub fu_map: Option<HashMap<String, usize>>,
 	pub op_map: Option<HashMap<String, u8>>,
 
 	/// [`riscv-tests`](https://github.com/riscv/riscv-tests) program specific

@@ -6,6 +6,7 @@ use riscv_emu_rust::l1cache::*;
 use riscv_emu_rust::l2cache::*;
 use riscv_emu_rust::memory::*;
 use riscv_emu_rust::mmu::*;
+use riscv_emu_rust::rob::*;
 use riscv_emu_rust::Emulator;
 use std::fs::File;
 use std::io::Read;
@@ -46,7 +47,6 @@ pub static mut EMULATOR: Emulator = Emulator {
 		},
 		reservation: 0,
 		is_reservation_set: false,
-		_dump_flag: false,
 		unsigned_data_mask: 0xffffffffffffffff,
 		tohost_addr: 0,
 
@@ -82,7 +82,7 @@ pub const COSIM_INSTRUCTIONS_FORMAT: [&'static str; 75] = [
 	"I", "I", "R", "R", "I", "I", "R", "R", "R", "I", "I", "R", "R", "R", "S", "R", "R", "I",
 ];
 
-pub const COSIM_INSTRUCTIONS_FU_T: [u8; 75] = [
+pub const COSIM_INSTRUCTIONS_FU_T: [usize; 75] = [
 	FU_ALU,
 	FU_ALU,
 	FU_ALU,
@@ -254,13 +254,13 @@ pub const LEN_OP: usize = 7;
 pub const LEN_CF: usize = 3;
 
 // FU_T ENUMs
-pub const FU_NONE: u8 = 0;
-pub const FU_LOAD: u8 = 1;
-pub const FU_STORE: u8 = 2;
-pub const FU_ALU: u8 = 3;
-pub const FU_CTRL_FLOW: u8 = 4;
-pub const FU_MULT: u8 = 5;
-pub const FU_CSR: u8 = 6;
+pub const FU_NONE: usize = 0;
+pub const FU_LOAD: usize = 1;
+pub const FU_STORE: usize = 2;
+pub const FU_ALU: usize = 3;
+pub const FU_CTRL_FLOW: usize = 4;
+pub const FU_MULT: usize = 5;
+pub const FU_CSR: usize = 6;
 
 // FU_OP ENUMs
 pub const OP_ADD: u8 = 0;

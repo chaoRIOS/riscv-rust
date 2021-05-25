@@ -46,12 +46,12 @@ pub unsafe extern "C" fn dpi_fetch_decode(
 		// EMULATOR.op_map = Some(HashMap::default());
 
 		let mut _format_map: HashMap<String, String> = HashMap::default();
-		let mut _fu_map: HashMap<String, u8> = HashMap::default();
+		let mut _fu_map: HashMap<String, usize> = HashMap::default();
 		let mut _op_map: HashMap<String, u8> = HashMap::default();
 		for i in 0..COSIM_INSTRUCTIONS.len() {
 			let mut _instr: &str = COSIM_INSTRUCTIONS[i];
 			let mut _format: &str = COSIM_INSTRUCTIONS_FORMAT[i];
-			let mut _fu: u8 = COSIM_INSTRUCTIONS_FU_T[i].clone();
+			let mut _fu: usize = COSIM_INSTRUCTIONS_FU_T[i].clone();
 			let mut _op: u8 = COSIM_INSTRUCTIONS_FU_OP[i].clone();
 			_format_map.insert(String::from(_instr), String::from(_format));
 			_fu_map.insert(String::from(_instr), _fu);
@@ -142,8 +142,8 @@ pub unsafe extern "C" fn dpi_fetch_decode(
 				data: 0,
 				name: "NOP",
 				cycles: 0,
-				operation: |cpu, word, _address| Ok(()),
-				disassemble: |cpu, word, _address, evaluate| String::from("NOP"),
+				operation: None,
+				dump_type: InstructionDumpType::Empty,
 			}
 		}
 	};
@@ -631,7 +631,11 @@ pub unsafe extern "C" fn dpi_issue_execute_writeback(
 				_ => {}
 			}
 
-			match (instruction.operation)(EMULATOR.get_mut_cpu(), word, instruction_address) {
+			match (instruction.operation.unwrap())(
+				EMULATOR.get_mut_cpu(),
+				word,
+				instruction_address,
+			) {
 				Ok(()) => {}
 				Err(e) => EMULATOR
 					.get_mut_cpu()
