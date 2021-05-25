@@ -1,9 +1,12 @@
 extern crate fnv;
 
 use mmu::{AddressingMode, MemoryAccessType, Mmu};
+use pkg::FU_TYPES;
+use std::collections::VecDeque;
 use std::fs::OpenOptions;
 use std::io::prelude::*;
 
+pub const GPR_CAPACITY: usize = 32;
 pub const CSR_CAPACITY: usize = 4096;
 
 const CSR_USTATUS_ADDRESS: u16 = 0x000;
@@ -62,23 +65,42 @@ pub const MIP_SEIP: u64 = 0x200;
 const MIP_STIP: u64 = 0x020;
 const MIP_SSIP: u64 = 0x002;
 
+pub const INSTUCTION_BUFFER_CAPACITY: usize = 64;
+pub const ROB_CAPACITY: usize = 64;
+
 /// Emulates a RISC-V CPU core
 pub struct Cpu {
 	pub clock: u64,
+
+	// RV32/64 indicator
+	pub unsigned_data_mask: u64,
 	pub xlen: Xlen,
+
 	pub privilege_mode: PrivilegeMode,
 	pub wfi: bool,
+
 	// using only lower 32bits of x, pc, and csr registers
 	// for 32-bit mode
-	pub x: [i64; 32],
-	pub f: [f64; 32],
+	pub x: [i64; GPR_CAPACITY],
+	pub f: [f64; GPR_CAPACITY],
 	pub pc: u64,
 	pub csr: [u64; CSR_CAPACITY],
-	pub instruction_buffer: Vec<u32>,
+
+	pub instruction_buffer: Option<VecDeque<u32>>,
+
+	// Calculating facilities for OOO execution
+	pub renaming_table: [[u64; 2]; GPR_CAPACITY],
+	pub function_unit_table: [u64; FU_TYPES],
+	pub reorder_buffer: [u64; ROB_CAPACITY],
+
+	// Memory subsystem
 	pub mmu: Mmu,
+
+	// Atomic facilities
 	pub reservation: u64, // @TODO: Should support multiple address reservations
 	pub is_reservation_set: bool,
-	pub unsigned_data_mask: u64,
+
+	// Tohost address
 	pub tohost_addr: u64,
 
 	// Exit signal
@@ -234,7 +256,12 @@ impl Cpu {
 			x: [0; 32],
 			f: [0.0; 32],
 			pc: 0,
-			instruction_buffer: Vec::new(),
+			instruction_buffer: Some(VecDeque::with_capacity(INSTUCTION_BUFFER_CAPACITY)),
+
+			renaming_table: [[0; 2]; 32],
+			function_unit_table: [0; 7],
+			reorder_buffer: [0; ROB_CAPACITY],
+
 			csr: [0; CSR_CAPACITY],
 			mmu: Mmu::new(Xlen::Bit64),
 			reservation: 0,

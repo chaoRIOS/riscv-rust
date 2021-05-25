@@ -9,7 +9,6 @@ edition = "2018"
 [dependencies]
 getopts = "0.2"
 riscv_emu_rust = {path = "../" ,default-features = false, optional = true}
-lab1 = {path = "../lab1"}
 
 [features]
 default = ["riscv_emu_rust"]

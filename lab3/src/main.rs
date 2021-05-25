@@ -1,16 +1,13 @@
 extern crate getopts;
 extern crate riscv_emu_rust;
 
-extern crate lab1;
-
 use riscv_emu_rust::cpu::Xlen;
+use riscv_emu_rust::pkg::EMULATOR;
 
 use getopts::Options;
 use std::env;
 use std::fs::File;
 use std::io::Read;
-
-use lab1::pkg::*;
 
 fn run_elf(input_path: &str) -> std::io::Result<()> {
 	let mut elf_file = File::open(input_path)?;

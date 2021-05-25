@@ -1,18 +1,11 @@
-#![allow(unused)]
+// #![allow(unused)]
 // use crate::utils::*;
-use fnv::FnvHashMap;
-use riscv_emu_rust::cpu::*;
-use riscv_emu_rust::l1cache::*;
-use riscv_emu_rust::l2cache::*;
-use riscv_emu_rust::memory::*;
-use riscv_emu_rust::mmu::*;
-use riscv_emu_rust::rob::*;
-use riscv_emu_rust::Emulator;
-
-use std::collections::VecDeque;
-use std::fs::File;
-use std::io::Read;
-use std::{mem, slice};
+use crate::Emulator;
+use cpu::{Cpu, PrivilegeMode, Xlen, CSR_CAPACITY, ROB_CAPACITY};
+use l1cache::L1Cache;
+use l2cache::L2Cache;
+use memory::Memory;
+use mmu::{AddressingMode, MemoryWrapper, Mmu, TLB_ENTRY_NUM};
 
 /// GLOBAL EMULATOR.
 pub static mut EMULATOR: Emulator = Emulator {
@@ -268,6 +261,7 @@ pub const FU_ALU: usize = 3;
 pub const FU_CTRL_FLOW: usize = 4;
 pub const FU_MULT: usize = 5;
 pub const FU_CSR: usize = 6;
+pub const FU_TYPES: usize = 7;
 
 // FU_OP ENUMs
 pub const OP_ADD: u8 = 0;
@@ -407,7 +401,7 @@ pub struct IdPerIssueT {
 }
 
 pub struct InstId2IsT {
-	issue_inst: [IdPerIssueT; ISSUE_NUM],
+	_issue_inst: [IdPerIssueT; ISSUE_NUM],
 }
 
 pub const ID2IS_LEN: usize = (1

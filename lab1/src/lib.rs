@@ -5,15 +5,18 @@ pub mod utils;
 
 use fnv::FnvHashMap;
 use pkg::*;
+use utils::*;
+
 use riscv_emu_rust::cpu::*;
 use riscv_emu_rust::memory::*;
 use riscv_emu_rust::mmu::*;
 use riscv_emu_rust::Emulator;
+
 use std::collections::HashMap;
+use std::collections::VecDeque;
 use std::fs::File;
 use std::io::Read;
 use std::ptr::NonNull;
-use utils::*;
 
 /// Dpi IF+ID(frontend) interface. Embedded an ELF parser and maintained
 /// readonly instruction memory space.
@@ -41,9 +44,6 @@ pub unsafe extern "C" fn dpi_fetch_decode(
 
 	if let None = EMULATOR.symbol_map {
 		EMULATOR.symbol_map = Some(FnvHashMap::default());
-		// EMULATOR.format_map = Some(HashMap::default());
-		// EMULATOR.fu_map = Some(HashMap::default());
-		// EMULATOR.op_map = Some(HashMap::default());
 
 		let mut _format_map: HashMap<String, String> = HashMap::default();
 		let mut _fu_map: HashMap<String, usize> = HashMap::default();
@@ -60,6 +60,7 @@ pub unsafe extern "C" fn dpi_fetch_decode(
 		EMULATOR.format_map = Some(_format_map);
 		EMULATOR.fu_map = Some(_fu_map);
 		EMULATOR.op_map = Some(_op_map);
+		EMULATOR.cpu.instruction_buffer = Some(VecDeque::with_capacity(INSTUCTION_BUFFER_CAPACITY));
 
 		let mut elf_file =
 			match File::open("/opt/orv64-merge/rrv64/tb/test_program/benchmarks/dhrystone.riscv") {
@@ -85,7 +86,8 @@ pub unsafe extern "C" fn dpi_fetch_decode(
 				println!("[RS] Boot PC {:x}", boot_addr_i);
 			}
 			EMULATOR.cpu.pc = boot_addr_i;
-			EMULATOR.cpu.instruction_buffer = Vec::new();
+			EMULATOR.cpu.instruction_buffer =
+				Some(VecDeque::with_capacity(INSTUCTION_BUFFER_CAPACITY));
 		}
 	}
 
@@ -104,7 +106,8 @@ pub unsafe extern "C" fn dpi_fetch_decode(
 				// }
 			}
 			EMULATOR.cpu.pc = flush_pc_i.into();
-			EMULATOR.cpu.instruction_buffer = Vec::new();
+			EMULATOR.cpu.instruction_buffer =
+				Some(VecDeque::with_capacity(INSTUCTION_BUFFER_CAPACITY));
 		}
 		false => {}
 	}

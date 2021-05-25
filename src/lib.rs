@@ -7,6 +7,7 @@ extern crate rand;
 
 use self::fnv::FnvHashMap;
 use std::collections::HashMap;
+use std::collections::VecDeque;
 use std::process;
 use std::str;
 use std::time::SystemTime;
@@ -19,17 +20,22 @@ pub mod l1cache;
 pub mod l2cache;
 pub mod memory;
 pub mod mmu;
+pub mod pkg;
 pub mod rob;
 
 use cpu::{
 	Cpu, Xlen, CSR_HPMCOUNTER3_ADDRESS, CSR_HPMCOUNTER4_ADDRESS, CSR_HPMCOUNTER5_ADDRESS,
-	CSR_HPMCOUNTER6_ADDRESS, CSR_MCYCLE_ADDRESS,
+	CSR_HPMCOUNTER6_ADDRESS, CSR_MCYCLE_ADDRESS, INSTUCTION_BUFFER_CAPACITY,
 };
 #[cfg(feature = "dramsim")]
 use dram::{send_request, terminate_pipe};
 use elf_analyzer::ElfAnalyzer;
 use l1cache::L1_CACHE_HIT_LATENCY;
 use l2cache::L2_CACHE_HIT_LATENCY;
+use pkg::{
+	COSIM_INSTRUCTIONS, COSIM_INSTRUCTIONS_FORMAT, COSIM_INSTRUCTIONS_FU_OP,
+	COSIM_INSTRUCTIONS_FU_T,
+};
 
 /// RISC-V emulator. It emulates RISC-V CPU and peripheral devices.
 ///
@@ -299,6 +305,23 @@ impl Emulator {
 			}
 			self.symbol_map = Some(_symbol_map);
 		}
+
+		let mut format_map: HashMap<String, String> = HashMap::default();
+		let mut fu_map: HashMap<String, usize> = HashMap::default();
+		let mut op_map: HashMap<String, u8> = HashMap::default();
+		for i in 0..COSIM_INSTRUCTIONS.len() {
+			let mut _instr: &str = COSIM_INSTRUCTIONS[i];
+			let mut _format: &str = COSIM_INSTRUCTIONS_FORMAT[i];
+			let mut _fu: usize = COSIM_INSTRUCTIONS_FU_T[i].clone();
+			let mut _op: u8 = COSIM_INSTRUCTIONS_FU_OP[i].clone();
+			format_map.insert(String::from(_instr), String::from(_format));
+			fu_map.insert(String::from(_instr), _fu);
+			op_map.insert(String::from(_instr), _op);
+		}
+		self.format_map = Some(format_map);
+		self.fu_map = Some(fu_map);
+		self.op_map = Some(op_map);
+		self.cpu.instruction_buffer = Some(VecDeque::with_capacity(INSTUCTION_BUFFER_CAPACITY));
 
 		// Detected whether the elf file is riscv-tests.
 		// Setting up CPU and Memory depending on it.
