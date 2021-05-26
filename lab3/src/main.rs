@@ -8,6 +8,10 @@ use getopts::Options;
 use std::env;
 use std::fs::File;
 use std::io::Read;
+use std::thread::Builder;
+
+// @TODO: Optimize Cache memory usage
+const STACK_SIZE: usize = 32 * 1024 * 1024;
 
 fn run_elf(input_path: &str) -> std::io::Result<()> {
 	let mut elf_file = File::open(input_path)?;
@@ -29,7 +33,13 @@ fn main() -> std::io::Result<()> {
 	// run_elf(args[1].clone())?;
 	match opts.parse(&args[1..]) {
 		Ok(_args) => match _args.opt_str("i") {
-			Some(input_path) => run_elf(input_path.as_str())?,
+			Some(input_path) => {
+				let child = Builder::new()
+					.stack_size(STACK_SIZE)
+					.spawn(move || run_elf(input_path.as_str()))
+					.unwrap();
+				return child.join().unwrap();
+			}
 			_ => {
 				println!("{}", opts.usage(&format!("{} [options]", args[0])));
 				return Ok(());

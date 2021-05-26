@@ -33,15 +33,7 @@ pub struct L2CacheLine {
 	pub data_blocks: [u8; L2_CACHE_BLOCK_SIZE as usize],
 }
 impl L2CacheLine {
-	pub fn new() -> L2CacheLine {
-		L2CacheLine {
-			l1_inclusive: false,
-			valid: false,
-			tag: 0 as u64,
-			data_blocks: [0 as u8; L2_CACHE_BLOCK_SIZE as usize],
-		}
-	}
-	pub const fn static_new() -> L2CacheLine {
+	pub fn new() -> Self {
 		L2CacheLine {
 			l1_inclusive: false,
 			valid: false,
@@ -75,15 +67,9 @@ pub struct L2CacheSet {
 	pub data: [L2CacheLine; L2_SET_ASSOCIATIVE_WAY as usize],
 }
 impl L2CacheSet {
-	pub fn new() -> L2CacheSet {
+	pub fn new() -> Self {
 		L2CacheSet {
 			data: [L2CacheLine::new(); L2_SET_ASSOCIATIVE_WAY as usize],
-		}
-	}
-
-	pub const fn static_new() -> L2CacheSet {
-		L2CacheSet {
-			data: [L2CacheLine::static_new(); L2_SET_ASSOCIATIVE_WAY as usize],
 		}
 	}
 }
@@ -97,17 +83,9 @@ pub struct L2Cache {
 }
 
 impl L2Cache {
-	pub fn new() -> L2Cache {
+	pub fn new() -> Self {
 		L2Cache {
 			data: [L2CacheSet::new(); L2_CACHE_SET_NUMBER as usize],
-			hit_num: 0,
-			miss_num: 0,
-		}
-	}
-
-	pub const fn static_new() -> L2Cache {
-		L2Cache {
-			data: [L2CacheSet::static_new(); L2_CACHE_SET_NUMBER as usize],
 			hit_num: 0,
 			miss_num: 0,
 		}

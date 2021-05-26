@@ -29,21 +29,13 @@ pub struct L1CacheLine {
 	pub data_blocks: [u8; L1_CACHE_BLOCK_SIZE as usize],
 }
 impl L1CacheLine {
-	pub fn new() -> L1CacheLine {
+	pub fn new() -> Self {
 		L1CacheLine {
 			valid: false,
 			tag: 0 as u64,
 			data_blocks: [0 as u8; L1_CACHE_BLOCK_SIZE as usize],
 		}
 	}
-	pub const fn static_new() -> L1CacheLine {
-		L1CacheLine {
-			valid: false,
-			tag: 0 as u64,
-			data_blocks: [0 as u8; L1_CACHE_BLOCK_SIZE as usize],
-		}
-	}
-
 	pub fn get(&self, offset: u64, width: u64) -> u64 {
 		let mut value: u64 = 0;
 		assert_eq!((width > 0) && (width <= 64), true);
@@ -69,15 +61,9 @@ pub struct L1CacheSet {
 	pub data: [L1CacheLine; L1_SET_ASSOCIATIVE_WAY as usize],
 }
 impl L1CacheSet {
-	pub fn new() -> L1CacheSet {
+	pub fn new() -> Self {
 		L1CacheSet {
 			data: [L1CacheLine::new(); L1_SET_ASSOCIATIVE_WAY as usize],
-		}
-	}
-
-	pub const fn static_new() -> L1CacheSet {
-		L1CacheSet {
-			data: [L1CacheLine::static_new(); L1_SET_ASSOCIATIVE_WAY as usize],
 		}
 	}
 }
@@ -99,17 +85,9 @@ pub struct L1Cache {
 }
 
 impl L1Cache {
-	pub fn new() -> L1Cache {
+	pub fn new() -> Self {
 		L1Cache {
 			data: [L1CacheSet::new(); L1_CACHE_SET_NUMBER as usize],
-			hit_num: 0,
-			miss_num: 0,
-		}
-	}
-
-	pub const fn static_new() -> L1Cache {
-		L1Cache {
-			data: [L1CacheSet::static_new(); L1_CACHE_SET_NUMBER as usize],
 			hit_num: 0,
 			miss_num: 0,
 		}
