@@ -85,13 +85,13 @@ impl Emulator {
 	pub fn run(&mut self) {
 		match self.is_test {
 			true => self.run_test(),
-			false => self.run_program(false, ""),
+			false => self.run_program(),
 		};
 	}
 
 	/// Runs program set by `setup_program()`. The emulator won't stop forever.
 	/// * Added our print function.
-	pub fn run_program(&mut self, trace_memory_access: bool, trace_path: &str) {
+	pub fn run_program(&mut self) {
 		// @TODO: Unique config for lab2
 		// self.cpu.x[2] = 0x7f7e9b50;
 
@@ -112,7 +112,101 @@ impl Emulator {
 				}
 			}
 
-			self.tick(trace_memory_access, trace_path);
+			self.tick();
+
+			#[cfg(feature = "debug-register")]
+			{
+				println!("{}  : 0x{:016x}", "pc", self.get_cpu().read_pc());
+				println!(
+					"{}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} ",
+					"zero",
+					self.cpu.x[0],
+					"ra",
+					self.cpu.x[1],
+					"sp",
+					self.cpu.x[2],
+					"gp",
+					self.cpu.x[3]
+				);
+				println!(
+					"{}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} ",
+					"tp",
+					self.cpu.x[4],
+					"t0",
+					self.cpu.x[5],
+					"t1",
+					self.cpu.x[6],
+					"t2",
+					self.cpu.x[7]
+				);
+				println!(
+					"{}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} ",
+					"s0",
+					self.cpu.x[8],
+					"s1",
+					self.cpu.x[9],
+					"a0",
+					self.cpu.x[10],
+					"a1",
+					self.cpu.x[11]
+				);
+				println!(
+					"{}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} ",
+					"a2",
+					self.cpu.x[12],
+					"a3",
+					self.cpu.x[13],
+					"a4",
+					self.cpu.x[14],
+					"a5",
+					self.cpu.x[15]
+				);
+				println!(
+					"{}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} ",
+					"a6",
+					self.cpu.x[16],
+					"a7",
+					self.cpu.x[17],
+					"s2",
+					self.cpu.x[18],
+					"s3",
+					self.cpu.x[19]
+				);
+				println!(
+					"{}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} ",
+					"s4",
+					self.cpu.x[20],
+					"s5",
+					self.cpu.x[21],
+					"s6",
+					self.cpu.x[22],
+					"s7",
+					self.cpu.x[23]
+				);
+				println!(
+					"{}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} ",
+					"s8",
+					self.cpu.x[24],
+					"s9",
+					self.cpu.x[25],
+					"s10",
+					self.cpu.x[26],
+					"s11",
+					self.cpu.x[27]
+				);
+				println!(
+					"{}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} ",
+					"t3",
+					self.cpu.x[28],
+					"t4",
+					self.cpu.x[29],
+					"t5",
+					self.cpu.x[30],
+					"t6",
+					self.cpu.x[31]
+				);
+				println!("{}  : 0x{:016x}", "mstatus", self.cpu.csr[0x300]);
+			}
 		}
 
 		// self.exit();
@@ -131,7 +225,7 @@ impl Emulator {
 			self.put_bytes_to_terminal(disas.as_bytes());
 			self.put_bytes_to_terminal(&[10]); // new line
 
-			self.tick(false, "");
+			self.tick();
 
 			// It seems in riscv-tests ends with end code
 			// written to a certain physical memory address
@@ -232,8 +326,8 @@ impl Emulator {
 	}
 
 	/// Runs CPU one cycle
-	pub fn tick(&mut self, trace_memory_access: bool, trace_path: &str) {
-		self.cpu.tick(trace_memory_access, trace_path);
+	pub fn tick(&mut self) {
+		self.cpu.tick();
 		if self.cpu.exit_signal == true {
 			self.exit();
 		}

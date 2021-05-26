@@ -1,14 +1,9 @@
 extern crate fnv;
 
-use std::collections::{HashMap, VecDeque};
-use std::fs::OpenOptions;
-use std::io::prelude::*;
+use std::collections::VecDeque;
 
-use mmu::{AddressingMode, MemoryAccessType, Mmu};
-use pkg::{
-	COSIM_INSTRUCTIONS, COSIM_INSTRUCTIONS_FORMAT, COSIM_INSTRUCTIONS_FU_OP,
-	COSIM_INSTRUCTIONS_FU_T, FU_TYPES,
-};
+use mmu::{AddressingMode, Mmu};
+use pkg::{COSIM_INSTRUCTIONS, COSIM_INSTRUCTIONS_FORMAT, COSIM_INSTRUCTIONS_FU_T, FU_TYPES};
 
 pub const GPR_CAPACITY: usize = 32;
 pub const CSR_CAPACITY: usize = 4096;
@@ -97,11 +92,6 @@ pub struct Cpu {
 	function_unit_table: [u64; FU_TYPES],
 	reorder_buffer: [u64; ROB_CAPACITY],
 	last_retired_clock: u64,
-
-	// Instruction maps
-	format_map: HashMap<String, String>,
-	fu_map: HashMap<String, usize>,
-	op_map: HashMap<String, u8>,
 
 	// Memory subsystem
 	pub mmu: Mmu,
@@ -261,7 +251,7 @@ impl Cpu {
 		let mut cpu = Cpu {
 			clock: 0,
 			xlen: Xlen::Bit64,
-			privilege_mode: PrivilegeMode::User,
+			privilege_mode: PrivilegeMode::Machine,
 			wfi: false,
 			x: [0; 32],
 			f: [0.0; 32],
@@ -272,10 +262,6 @@ impl Cpu {
 			function_unit_table: [0; 7],
 			reorder_buffer: [0; ROB_CAPACITY],
 			last_retired_clock: 0,
-
-			format_map: HashMap::default(),
-			fu_map: HashMap::default(),
-			op_map: HashMap::default(),
 
 			csr: [0; CSR_CAPACITY],
 			mmu: Mmu::new(Xlen::Bit64),
@@ -288,18 +274,6 @@ impl Cpu {
 		};
 		cpu.x[0xb] = 0x1020; // I don't know why but Linux boot seems to require this initialization
 		cpu.write_csr_raw(CSR_MISA_ADDRESS, 0x800000008014312f);
-
-		// Create map for instructions and functional units
-		for i in 0..COSIM_INSTRUCTIONS.len() {
-			let instr: &str = COSIM_INSTRUCTIONS[i];
-			let format: &str = COSIM_INSTRUCTIONS_FORMAT[i];
-			let fu: usize = COSIM_INSTRUCTIONS_FU_T[i].clone();
-			let op: u8 = COSIM_INSTRUCTIONS_FU_OP[i].clone();
-			cpu.format_map
-				.insert(String::from(instr), String::from(format));
-			cpu.fu_map.insert(String::from(instr), fu);
-			cpu.op_map.insert(String::from(instr), op);
-		}
 
 		cpu
 	}
@@ -364,7 +338,7 @@ impl Cpu {
 	}
 
 	/// Runs program one cycle. Fetch, decode, and execution are completed in a cycle so far.
-	pub fn tick(&mut self, trace_memory_access: bool, trace_path: &str) {
+	pub fn tick(&mut self) {
 		let instruction_address = self.pc;
 
 		if self.wfi {
@@ -407,11 +381,24 @@ impl Cpu {
 
 				(result, cycles)
 			}
-			Err(()) => {
-				// @TODO: illegal instructions
-				//
-				// Currently used for exitting.
+			Err("exit") => {
 				self.exit_signal = true;
+				return;
+			}
+			Err("print") => {
+				return;
+			}
+			Err("illegal instruction") => {
+				self.handle_exception(
+					Trap {
+						trap_type: TrapType::IllegalInstruction,
+						value: instruction_address,
+					},
+					instruction_address,
+				);
+				return;
+			}
+			_ => {
 				return;
 			}
 		};
@@ -443,7 +430,7 @@ impl Cpu {
 						#[cfg(debug_assertions)]
 						println!("[RS] Get I format");
 						match COSIM_INSTRUCTIONS[index] {
-							"CSRRC" | "CSRRCI" | "CSRRS" | "CSRRW" | "CSRRWI" | "CSRRSI" => {
+							"CSRRC" | "CSRRCI" | "CSRRS" | "CSRRSI" | "CSRRW" | "CSRRWI" => {
 								#[cfg(debug_assertions)]
 								println!("[RS] Get CSR format");
 								let format = parse_format_csr(word);
@@ -559,26 +546,6 @@ impl Cpu {
 			}
 		}
 
-		if trace_memory_access == true {
-			for i in 0..self.mmu.memory_access_trace.len() {
-				let mut file = OpenOptions::new().append(true).open(trace_path).unwrap();
-
-				file.write(
-					format!(
-						"0x{:016x} {} {}\n",
-						self.mmu.memory_access_trace[i].address,
-						match self.mmu.memory_access_trace[i].operation {
-							MemoryAccessType::Read => "READ",
-							MemoryAccessType::Write => "WRITE",
-							_ => "",
-						},
-						self.mmu.memory_access_trace[i].cycle
-					)
-					.as_bytes(),
-				)
-				.unwrap();
-			}
-		}
 		self.mmu.tick(&mut self.csr[CSR_MIP_ADDRESS as usize]);
 		self.handle_interrupt(self.pc);
 		// self.clock = self.clock.wrapping_add(1);
@@ -627,7 +594,7 @@ impl Cpu {
 	/// [`Instruction`](struct.Instruction.html). Using [`DecodeCache`](struct.DecodeCache.html)
 	/// so if cache hits this method returns the result very quickly.
 	/// The result will be stored to cache.
-	pub fn decode(&mut self, word: u32, instruction_address: u64) -> Result<&Instruction, ()> {
+	pub fn decode(&mut self, word: u32, instruction_address: u64) -> Result<&Instruction, &str> {
 		match self.decode_and_get_instruction_index(word) {
 			Ok(index) => {
 				// Handle to/from host
@@ -637,21 +604,21 @@ impl Cpu {
 						let f = parse_format_s(word);
 						if self.x[f.rs1].wrapping_add(f.imm) == (self.tohost_addr as i64) {
 							#[cfg(feature = "debug-tohost")]
-							println!(
-								"[Tohost] {} {:x} to {:x}",
-								inst.name,
-								self.x[f.rs2],
-								self.x[f.rs1].wrapping_add(f.imm)
-							);
+							{
+								println!(
+									"[Tohost] {} {:x} to {:x}",
+									inst.name,
+									self.x[f.rs2],
+									self.x[f.rs1].wrapping_add(f.imm)
+								);
+							}
 							let tohost_addr = self.tohost_addr;
 							let tohost_data_addr = self.x[f.rs2];
 							match tohost_data_addr {
 								0..=0x80000000 => {
 									// Exit for riscv-test on tohost getting 1/0
-									//
-									// @TODO: Add pass of fail printing
 									self.exit_signal = true;
-									return Err(());
+									return Err("exit");
 								}
 								_ => {
 									// Tohost I/O stream
@@ -684,34 +651,28 @@ impl Cpu {
 									self.get_mut_mmu().store_word_raw(tohost_addr + 0x40, 1);
 									self.get_mut_mmu().store_word_raw(tohost_addr, 0);
 
-									// Exit after print to host
-									//
-									// @TODO: verify
-									self.exit_signal = true;
-									return Err(());
+									return Err("print");
 								}
 							};
 						}
 					}
 					"JAL" => {
 						// Exit on iterative JAL
-						//
-						// @TODO: Add error exit status
 						let f = parse_format_j(word);
 						if instruction_address + f.imm == instruction_address {
 							self.exit_signal = true;
-							return Err(());
+							return Err("exit");
 						}
 					}
-					"ECALL" => {
-						self.exit_signal = true;
-						return Err(());
-					}
+					// "ECALL" => {
+					// 	self.exit_signal = true;
+					// 	return Err("exit");
+					// }
 					_ => {}
 				}
 				Ok(&INSTRUCTIONS[index])
 			}
-			Err(()) => Err(()),
+			Err(()) => Err("illegal instruction"),
 		}
 	}
 

@@ -21,10 +21,11 @@ default = []
 dramsim = []
 memdump = []
 
-debug = ["debug-cache", "debug-dramsim", "debug-disassemble", "debug-tohost"]
+debug = ["debug-cache", "debug-dramsim", "debug-disassemble", "debug-tohost", "debug-register"]
 debug-cache = []
 debug-dramsim = ["dramsim"]
 debug-disassemble = []
+debug-register = []
 debug-tohost = []
 
 [badges]

@@ -21,7 +21,7 @@ fn run_elf(input_path: &str) -> std::io::Result<()> {
 	let mut emulator = Emulator::new();
 	emulator.setup_program(elf_contents, vec![]);
 	emulator.update_xlen(Xlen::Bit64);
-	emulator.run_program(false, "");
+	emulator.run_program();
 	Ok(())
 }
 
@@ -42,12 +42,10 @@ fn main() -> std::io::Result<()> {
 			}
 			_ => {
 				println!("{}", opts.usage(&format!("{} [options]", args[0])));
-				return Ok(());
 			}
 		},
 		Err(f) => {
 			println!("{}\n{}", f, opts.usage(&format!("{} [options]", args[0])));
-			return Ok(());
 		}
 	};
 	Ok(())
