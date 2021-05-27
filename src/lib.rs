@@ -23,7 +23,7 @@ pub mod rob;
 
 use cpu::{
 	Cpu, Xlen, CSR_HPMCOUNTER3_ADDRESS, CSR_HPMCOUNTER4_ADDRESS, CSR_HPMCOUNTER5_ADDRESS,
-	CSR_HPMCOUNTER6_ADDRESS, CSR_MCYCLE_ADDRESS,
+	CSR_HPMCOUNTER6_ADDRESS, CSR_INSERT_ADDRESS, CSR_MCYCLE_ADDRESS,
 };
 #[cfg(feature = "dramsim")]
 use dram::{send_request, terminate_pipe};
@@ -101,112 +101,7 @@ impl Emulator {
 			.as_secs_f64();
 
 		loop {
-			#[cfg(feature = "debug-disassemble")]
-			{
-				let disas = self.cpu.disassemble_next_instruction();
-
-				// ignore memset
-				if disas.as_str() != "" {
-					self.put_bytes_to_terminal(disas.as_bytes());
-					self.put_bytes_to_terminal(&[10]); // new line
-				}
-			}
-
 			self.tick();
-
-			#[cfg(feature = "debug-register")]
-			{
-				println!("{}  : 0x{:016x}", "pc", self.get_cpu().read_pc());
-				println!(
-					"{}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} ",
-					"zero",
-					self.cpu.x[0],
-					"ra",
-					self.cpu.x[1],
-					"sp",
-					self.cpu.x[2],
-					"gp",
-					self.cpu.x[3]
-				);
-				println!(
-					"{}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} ",
-					"tp",
-					self.cpu.x[4],
-					"t0",
-					self.cpu.x[5],
-					"t1",
-					self.cpu.x[6],
-					"t2",
-					self.cpu.x[7]
-				);
-				println!(
-					"{}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} ",
-					"s0",
-					self.cpu.x[8],
-					"s1",
-					self.cpu.x[9],
-					"a0",
-					self.cpu.x[10],
-					"a1",
-					self.cpu.x[11]
-				);
-				println!(
-					"{}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} ",
-					"a2",
-					self.cpu.x[12],
-					"a3",
-					self.cpu.x[13],
-					"a4",
-					self.cpu.x[14],
-					"a5",
-					self.cpu.x[15]
-				);
-				println!(
-					"{}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} ",
-					"a6",
-					self.cpu.x[16],
-					"a7",
-					self.cpu.x[17],
-					"s2",
-					self.cpu.x[18],
-					"s3",
-					self.cpu.x[19]
-				);
-				println!(
-					"{}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} ",
-					"s4",
-					self.cpu.x[20],
-					"s5",
-					self.cpu.x[21],
-					"s6",
-					self.cpu.x[22],
-					"s7",
-					self.cpu.x[23]
-				);
-				println!(
-					"{}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} ",
-					"s8",
-					self.cpu.x[24],
-					"s9",
-					self.cpu.x[25],
-					"s10",
-					self.cpu.x[26],
-					"s11",
-					self.cpu.x[27]
-				);
-				println!(
-					"{}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} ",
-					"t3",
-					self.cpu.x[28],
-					"t4",
-					self.cpu.x[29],
-					"t5",
-					self.cpu.x[30],
-					"t6",
-					self.cpu.x[31]
-				);
-				println!("{}  : 0x{:016x}", "mstatus", self.cpu.csr[0x300]);
-			}
 		}
 
 		// self.exit();
@@ -286,6 +181,15 @@ impl Emulator {
 		println!(
 			"total Latency = {} cycles",
 			self.cpu.read_csr_raw(CSR_MCYCLE_ADDRESS)
+		);
+		println!(
+			"total Instruction = {} instructions",
+			self.cpu.read_csr_raw(CSR_INSERT_ADDRESS)
+		);
+		println!(
+			"IPC = {} inst/cycle",
+			(self.cpu.read_csr_raw(CSR_INSERT_ADDRESS) as f32)
+				/ (self.cpu.read_csr_raw(CSR_MCYCLE_ADDRESS) as f32)
 		);
 		// L1 Cache hit/miss
 		let l1_hit_num = self.cpu.read_csr_raw(CSR_HPMCOUNTER3_ADDRESS);

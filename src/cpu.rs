@@ -1,9 +1,12 @@
 extern crate fnv;
 
+use std::cmp;
 use std::collections::VecDeque;
 
 use mmu::{AddressingMode, Mmu};
-use pkg::{COSIM_INSTRUCTIONS, COSIM_INSTRUCTIONS_FORMAT, COSIM_INSTRUCTIONS_FU_T, FU_TYPES};
+use pkg::{
+	COSIM_INSTRUCTIONS, COSIM_INSTRUCTIONS_FORMAT, COSIM_INSTRUCTIONS_FU_T, FU_TYPES, ISSUE_NUM,
+};
 
 pub const GPR_CAPACITY: usize = 32;
 pub const CSR_CAPACITY: usize = 4096;
@@ -47,7 +50,7 @@ const _CSR_PMPADDR0_ADDRESS: u16 = 0x3b0;
 pub const CSR_MCYCLE_ADDRESS: u16 = 0xb00;
 const _CSR_CYCLE_ADDRESS: u16 = 0xc00;
 const CSR_TIME_ADDRESS: u16 = 0xc01;
-const _CSR_INSERT_ADDRESS: u16 = 0xc02;
+pub const CSR_INSERT_ADDRESS: u16 = 0xc02;
 
 pub const CSR_HPMCOUNTER3_ADDRESS: u16 = 0xc03;
 pub const CSR_HPMCOUNTER4_ADDRESS: u16 = 0xc04;
@@ -85,13 +88,15 @@ pub struct Cpu {
 	pub pc: u64,
 	pub csr: [u64; CSR_CAPACITY],
 
-	pub instruction_buffer: VecDeque<u32>,
+	pub instruction_buffer: VecDeque<(u64, u32, bool)>,
 
 	// Calculating facilities for OOO execution
 	renaming_table: [[u64; 2]; GPR_CAPACITY],
 	function_unit_table: [u64; FU_TYPES],
 	reorder_buffer: [u64; ROB_CAPACITY],
-	last_retired_clock: u64,
+	reorder_buffer_pointer: usize,
+
+	last_instruction_retired_clock: u64,
 
 	// Memory subsystem
 	pub mmu: Mmu,
@@ -261,7 +266,8 @@ impl Cpu {
 			renaming_table: [[0; 2]; 32],
 			function_unit_table: [0; 7],
 			reorder_buffer: [0; ROB_CAPACITY],
-			last_retired_clock: 0,
+			reorder_buffer_pointer: 0,
+			last_instruction_retired_clock: 0,
 
 			csr: [0; CSR_CAPACITY],
 			mmu: Mmu::new(Xlen::Bit64),
@@ -330,17 +336,21 @@ impl Cpu {
 
 	/// Flush pipeline
 	pub fn flush_pipeline(&mut self) {
+		//
 		self.instruction_buffer.clear();
-		self.renaming_table = [[0; 2]; 32];
-		// FU trace should be held
-		// self.function_unit_table= [0; 7];
+		// Fulsh renaming table
+		self.renaming_table = [*(self
+			.renaming_table
+			.iter()
+			.max_by(|x, y| x[1].cmp(&y[1]))
+			.unwrap()); 32];
+		// Normalize FU table to last completed operation
+		self.function_unit_table = [*(self.function_unit_table.iter().max().unwrap()); 7];
 		self.reorder_buffer = [0; ROB_CAPACITY];
 	}
 
 	/// Runs program one cycle. Fetch, decode, and execution are completed in a cycle so far.
 	pub fn tick(&mut self) {
-		let instruction_address = self.pc;
-
 		if self.wfi {
 			if (self.read_csr_raw(CSR_MIE_ADDRESS) & self.read_csr_raw(CSR_MIP_ADDRESS)) != 0 {
 				self.wfi = false;
@@ -349,216 +359,370 @@ impl Cpu {
 			return;
 		}
 
-		let word = match self.fetch_uncompress() {
-			Ok(word) => word,
-			Err(e) => {
-				// Handle instruction page fault
-				self.handle_exception(e, instruction_address);
-				// @TODO: fix
-				// e.g. add fetch latency
-				return;
-			}
-		};
+		// Multi-issue frontend
+		// println!(
+		// 	"Fetch {}",
+		// 	cmp::min(
+		// 		ISSUE_NUM,
+		// 		INSTUCTION_BUFFER_CAPACITY - self.instruction_buffer.len(),
+		// 	)
+		// );
+		for _ in 0..cmp::min(
+			ISSUE_NUM,
+			INSTUCTION_BUFFER_CAPACITY - self.instruction_buffer.len(),
+		) {
+			match self.fetch() {
+				Ok(word) => {
+					// println!("Fetch 0x{:08x}", instruction_address);
 
-		// @TODO: multi-issue
-		// @TODO: use ROB
-		self.instruction_buffer.push_back(word);
-		let word = self.instruction_buffer.pop_front().unwrap();
-
-		let decode_result = self.decode(word, instruction_address);
-
-		// Extra exit after decode stage, because we handle to/from host operation in decode stage.
-		// Currently detect as exit when
-		// * tohost address is set
-		// * JAL to the identical address
-		// * ECALL
-		let pipeline_result = match decode_result {
-			Ok(inst) => {
-				// println!("inst={},pc={}", inst.get_name(), instruction_address);
-				let cycles = inst.cycles;
-				let result = (inst.operation)(self, word, instruction_address);
-				self.x[0] = 0; // hardwired zero
-
-				(result, cycles)
-			}
-			Err("exit") => {
-				self.exit_signal = true;
-				return;
-			}
-			Err("print") => {
-				return;
-			}
-			Err("illegal instruction") => {
-				self.handle_exception(
-					Trap {
-						trap_type: TrapType::IllegalInstruction,
-						value: instruction_address,
-					},
-					instruction_address,
-				);
-				return;
-			}
-			_ => {
-				return;
-			}
-		};
-
-		match pipeline_result.0 {
-			Ok(()) => {
-				// Calc OOO
-				let index = self.decode_and_get_instruction_index(word).unwrap();
-				// Find instruction's format
-				// with format, decode the instruction to get dependent registers
-
-				// 1. Get C(dep)
-				let mut completed_clock_dependent: u64 = 0;
-
-				let mut rd: usize = 0;
-				match COSIM_INSTRUCTIONS_FORMAT[index] {
-					"B" => {
-						#[cfg(debug_assertions)]
-						println!("[RS] Get B format");
-						let format = parse_format_b(word);
-						if self.renaming_table[format.rs1][1] > completed_clock_dependent {
-							completed_clock_dependent = self.renaming_table[format.rs1][1];
+					match (word & 0x3) == 0x3 {
+						true => {
+							self.instruction_buffer.push_back((self.pc, word, false));
+							self.pc = self.pc.wrapping_add(4); // 32-bit length non-compressed instruction
 						}
-						if self.renaming_table[format.rs2][1] > completed_clock_dependent {
-							completed_clock_dependent = self.renaming_table[format.rs2][1];
+						false => {
+							self.instruction_buffer.push_back((
+								self.pc,
+								self.uncompress(word & 0xffff),
+								true,
+							));
+							self.pc = self.pc.wrapping_add(2); // 16-bit length compressed instruction
 						}
-					}
-					"I" => {
-						#[cfg(debug_assertions)]
-						println!("[RS] Get I format");
-						match COSIM_INSTRUCTIONS[index] {
-							"CSRRC" | "CSRRCI" | "CSRRS" | "CSRRSI" | "CSRRW" | "CSRRWI" => {
-								#[cfg(debug_assertions)]
-								println!("[RS] Get CSR format");
-								let format = parse_format_csr(word);
-
-								// @TODO: CSR dependency?
-
-								if self.renaming_table[format.rs][1] > completed_clock_dependent {
-									completed_clock_dependent = self.renaming_table[format.rs][1];
-								}
-
-								rd = format.rd;
-							}
-							_ => {
-								#[cfg(debug_assertions)]
-								println!("[RS] Get I format");
-								let format = parse_format_i(word);
-
-								if self.renaming_table[format.rs1][1] > completed_clock_dependent {
-									completed_clock_dependent = self.renaming_table[format.rs1][1];
-								}
-
-								rd = format.rd;
-							}
-						}
-					}
-					"J" => {
-						#[cfg(debug_assertions)]
-						println!("[RS] Get J format");
-						let format = parse_format_j(word);
-
-						rd = format.rd;
-					}
-					"R" => {
-						#[cfg(debug_assertions)]
-						println!("[RS] Get R format");
-						let format = parse_format_r(word);
-						if self.renaming_table[format.rs1][1] > completed_clock_dependent {
-							completed_clock_dependent = self.renaming_table[format.rs1][1];
-						}
-						if self.renaming_table[format.rs2][1] > completed_clock_dependent {
-							completed_clock_dependent = self.renaming_table[format.rs2][1];
-						}
-						rd = format.rd;
-					}
-					"S" => {
-						#[cfg(debug_assertions)]
-						println!("[RS] Get S format");
-
-						let format = parse_format_s(word);
-						if self.renaming_table[format.rs1][1] > completed_clock_dependent {
-							completed_clock_dependent = self.renaming_table[format.rs1][1];
-						}
-						if self.renaming_table[format.rs2][1] > completed_clock_dependent {
-							completed_clock_dependent = self.renaming_table[format.rs2][1];
-						}
-					}
-					"U" => {
-						#[cfg(debug_assertions)]
-						println!("[RS] Get U format");
-
-						let format = parse_format_u(word);
-						rd = format.rd;
-					}
-					_ => {}
+					};
 				}
-
-				// 2. Get C(j-1)
-				let completed_clock_functional_unit: u64 =
-					self.function_unit_table[COSIM_INSTRUCTIONS_FU_T[index]];
-
-				// 3. Get L(i)
-				// including mmu latency, always serial
-				let functional_unit_latency =
-					(pipeline_result.1 as u64) + self.get_mut_mmu().mmu_latency;
-
-				// 4. Get C(i)
-				let completed_clock: u64 = match completed_clock_dependent
-					> (completed_clock_functional_unit + functional_unit_latency)
-				{
-					true => completed_clock_dependent,
-					false => completed_clock_functional_unit + functional_unit_latency,
-				};
-
-				// 5. Get R(i)
-				let retired_clock: u64 = match completed_clock > self.last_retired_clock {
-					true => completed_clock,
-					false => self.last_retired_clock + 1,
-				};
-
-				// @TODO: 6. multi issue compensation: k
-				// retired_clock += k
-
-				// 7. Update tables
-				// 7.1 Renaming table
-				if rd != 0 {
-					self.renaming_table[rd] = [retired_clock, completed_clock];
+				Err(e) => {
+					// Handle instruction page fault
+					self.handle_exception(e, self.pc);
+					// @TODO: fix
+					// e.g. add fetch latency
+					return;
 				}
-				// 7.2 Functional unit
-				self.function_unit_table[COSIM_INSTRUCTIONS_FU_T[index]] = completed_clock;
-
-				// 8. Update clocks
-				self.clock = retired_clock;
-				self.get_mut_mmu().clock = self.clock;
-			}
-			Err(e) => {
-				// Handle pipeline traps
-				// @TODO: More precise exception and latency calculation
-				self.clock = self.mmu.clock;
-
-				// Flush pipeline
-				self.flush_pipeline();
-				self.handle_exception(e, instruction_address);
-			}
+			};
 		}
 
-		self.mmu.tick(&mut self.csr[CSR_MIP_ADDRESS as usize]);
-		self.handle_interrupt(self.pc);
-		// self.clock = self.clock.wrapping_add(1);
+		// @TODO: use ROB
+		// should pop min(ROB_ready, IB_len, [ISSUE_NUM]? )
+		// ROB is round-robin, always ready
+		let issue_number = cmp::min(self.instruction_buffer.len(), ISSUE_NUM);
+		// println!("Issue {}", issue_number);
 
-		// cpu core clock : mtime clock in clint = 8 : 1 is
-		// just an arbiraty ratio.
-		// @TODO: Implement more properly
-		// self.write_csr_raw(CSR_CYCLE_ADDRESS, self.clock * 8);
-		self.write_csr_raw(CSR_MCYCLE_ADDRESS, self.clock);
-		self.write_csr_raw(CSR_HPMCOUNTER3_ADDRESS, self.mmu.l1_cache.hit_num);
-		self.write_csr_raw(CSR_HPMCOUNTER4_ADDRESS, self.mmu.l1_cache.miss_num);
-		self.write_csr_raw(CSR_HPMCOUNTER5_ADDRESS, self.mmu.l2_cache.hit_num);
-		self.write_csr_raw(CSR_HPMCOUNTER6_ADDRESS, self.mmu.l2_cache.miss_num);
+		for _ in 0..issue_number {
+			#[cfg(feature = "debug-disassemble")]
+			{
+				let disas = self.disassemble_next_instruction();
+
+				println!("{}", disas);
+			}
+			let (instruction_address, word, compressed) = match self.instruction_buffer.pop_front()
+			{
+				Some(i) => i,
+				None => {
+					break;
+				}
+			};
+
+			if compressed {
+				self.pc = instruction_address + 2;
+			} else {
+				self.pc = instruction_address + 4;
+			}
+			// let (instruction_address, word) = self.instruction_buffer.pop_front().unwrap();
+
+			#[cfg(feature = "debug-register")]
+			{
+				println!("{}  : 0x{:016x}", "pc", self.pc);
+				println!(
+					"{}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} ",
+					"zero", self.x[0], "ra", self.x[1], "sp", self.x[2], "gp", self.x[3]
+				);
+				println!(
+					"{}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} ",
+					"tp", self.x[4], "t0", self.x[5], "t1", self.x[6], "t2", self.x[7]
+				);
+				println!(
+					"{}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} ",
+					"s0", self.x[8], "s1", self.x[9], "a0", self.x[10], "a1", self.x[11]
+				);
+				println!(
+					"{}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} ",
+					"a2", self.x[12], "a3", self.x[13], "a4", self.x[14], "a5", self.x[15]
+				);
+				println!(
+					"{}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} ",
+					"a6", self.x[16], "a7", self.x[17], "s2", self.x[18], "s3", self.x[19]
+				);
+				println!(
+					"{}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} ",
+					"s4", self.x[20], "s5", self.x[21], "s6", self.x[22], "s7", self.x[23]
+				);
+				println!(
+					"{}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} ",
+					"s8", self.x[24], "s9", self.x[25], "s10", self.x[26], "s11", self.x[27]
+				);
+				println!(
+					"{}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} ",
+					"t3", self.x[28], "t4", self.x[29], "t5", self.x[30], "t6", self.x[31]
+				);
+				println!("{}  : 0x{:016x}", "mstatus", self.csr[0x300]);
+			}
+			// Enter ROB
+			if self.reorder_buffer_pointer >= ROB_CAPACITY {
+				self.reorder_buffer_pointer = 0;
+			}
+
+			// I(i): issued clock (enter FU)
+			// I(i) >= D(i)
+			let issued_clock = self.reorder_buffer[self.reorder_buffer_pointer];
+
+			let decode_result = self.decode(word, instruction_address);
+
+			// Extra exit after decode stage, because we handle to/from host operation in decode stage.
+			// Currently detect as exit when
+			// * tohost address is set
+			// * JAL to the identical address
+			let pipeline_result = match decode_result {
+				Ok(inst) => {
+					let cycles = inst.cycles;
+					let result = (inst.operation)(self, word, instruction_address);
+					self.x[0] = 0; // hardwired zero
+
+					(result, cycles)
+				}
+				Err("exit") => {
+					self.exit_signal = true;
+					return;
+				}
+				Err("print") => {
+					return;
+				}
+				Err("illegal instruction") => {
+					self.handle_exception(
+						Trap {
+							trap_type: TrapType::IllegalInstruction,
+							value: instruction_address,
+						},
+						instruction_address,
+					);
+					return;
+				}
+				_ => {
+					return;
+				}
+			};
+
+			#[cfg(feature = "debug-register")]
+			{
+				println!("{}  : 0x{:016x}", "pc", self.pc);
+				println!(
+					"{}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} ",
+					"zero", self.x[0], "ra", self.x[1], "sp", self.x[2], "gp", self.x[3]
+				);
+				println!(
+					"{}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} ",
+					"tp", self.x[4], "t0", self.x[5], "t1", self.x[6], "t2", self.x[7]
+				);
+				println!(
+					"{}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} ",
+					"s0", self.x[8], "s1", self.x[9], "a0", self.x[10], "a1", self.x[11]
+				);
+				println!(
+					"{}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} ",
+					"a2", self.x[12], "a3", self.x[13], "a4", self.x[14], "a5", self.x[15]
+				);
+				println!(
+					"{}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} ",
+					"a6", self.x[16], "a7", self.x[17], "s2", self.x[18], "s3", self.x[19]
+				);
+				println!(
+					"{}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} ",
+					"s4", self.x[20], "s5", self.x[21], "s6", self.x[22], "s7", self.x[23]
+				);
+				println!(
+					"{}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} ",
+					"s8", self.x[24], "s9", self.x[25], "s10", self.x[26], "s11", self.x[27]
+				);
+				println!(
+					"{}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} ",
+					"t3", self.x[28], "t4", self.x[29], "t5", self.x[30], "t6", self.x[31]
+				);
+				println!("{}  : 0x{:016x}", "mstatus", self.csr[0x300]);
+			}
+
+			// Enter EX
+			// 1. operate functionality
+			// 2. calculate timing
+			match pipeline_result.0 {
+				Ok(()) => {
+					// Calc OOO timing
+					let index = self.decode_and_get_instruction_index(word).unwrap();
+					// Find instruction's format
+					// with format, decode the instruction to get dependent registers
+
+					// 1. Get C(dep)
+					let mut completed_clock_dependent: u64 = 0;
+
+					let mut rd: usize = 0;
+					match COSIM_INSTRUCTIONS_FORMAT[index] {
+						"B" => {
+							#[cfg(debug_assertions)]
+							println!("[RS] Get B format");
+							let format = parse_format_b(word);
+							if self.renaming_table[format.rs1][1] > completed_clock_dependent {
+								completed_clock_dependent = self.renaming_table[format.rs1][1];
+							}
+							if self.renaming_table[format.rs2][1] > completed_clock_dependent {
+								completed_clock_dependent = self.renaming_table[format.rs2][1];
+							}
+						}
+						"I" => {
+							#[cfg(debug_assertions)]
+							println!("[RS] Get I format");
+							match COSIM_INSTRUCTIONS[index] {
+								"CSRRC" | "CSRRCI" | "CSRRS" | "CSRRSI" | "CSRRW" | "CSRRWI" => {
+									#[cfg(debug_assertions)]
+									println!("[RS] Get CSR format");
+									let format = parse_format_csr(word);
+
+									// @TODO: CSR dependency?
+
+									if self.renaming_table[format.rs][1] > completed_clock_dependent
+									{
+										completed_clock_dependent =
+											self.renaming_table[format.rs][1];
+									}
+
+									rd = format.rd;
+								}
+								_ => {
+									#[cfg(debug_assertions)]
+									println!("[RS] Get I format");
+									let format = parse_format_i(word);
+
+									if self.renaming_table[format.rs1][1]
+										> completed_clock_dependent
+									{
+										completed_clock_dependent =
+											self.renaming_table[format.rs1][1];
+									}
+
+									rd = format.rd;
+								}
+							}
+						}
+						"J" => {
+							#[cfg(debug_assertions)]
+							println!("[RS] Get J format");
+							let format = parse_format_j(word);
+
+							rd = format.rd;
+						}
+						"R" => {
+							#[cfg(debug_assertions)]
+							println!("[RS] Get R format");
+							let format = parse_format_r(word);
+							if self.renaming_table[format.rs1][1] > completed_clock_dependent {
+								completed_clock_dependent = self.renaming_table[format.rs1][1];
+							}
+							if self.renaming_table[format.rs2][1] > completed_clock_dependent {
+								completed_clock_dependent = self.renaming_table[format.rs2][1];
+							}
+							rd = format.rd;
+						}
+						"S" => {
+							#[cfg(debug_assertions)]
+							println!("[RS] Get S format");
+
+							let format = parse_format_s(word);
+							if self.renaming_table[format.rs1][1] > completed_clock_dependent {
+								completed_clock_dependent = self.renaming_table[format.rs1][1];
+							}
+							if self.renaming_table[format.rs2][1] > completed_clock_dependent {
+								completed_clock_dependent = self.renaming_table[format.rs2][1];
+							}
+						}
+						"U" => {
+							#[cfg(debug_assertions)]
+							println!("[RS] Get U format");
+
+							let format = parse_format_u(word);
+							rd = format.rd;
+						}
+						_ => {}
+					}
+
+					// 2. Get C(j-1)
+					let completed_clock_functional_unit: u64 =
+						self.function_unit_table[COSIM_INSTRUCTIONS_FU_T[index]];
+
+					// 3. Get L(i)
+					// including mmu latency, always serial
+					let functional_unit_latency =
+						(pipeline_result.1 as u64) + self.get_mut_mmu().mmu_latency;
+
+					// 4. Get C(i)
+					// C(i) = L(i) + max[I(i), C(dep), C(j-1)]
+					let completed_clock: u64 = cmp::max(
+						cmp::max(completed_clock_dependent, issued_clock),
+						completed_clock_functional_unit,
+					) + functional_unit_latency;
+
+					// 5. Get R(i)
+					let retired_clock: u64 =
+						match completed_clock > self.last_instruction_retired_clock {
+							true => completed_clock,
+							false => self.last_instruction_retired_clock + 1,
+						};
+
+					// @TODO: 6. multi issue compensation: k
+					// retired_clock += k
+
+					// 7. Update tables
+					// 7.1 Renaming table
+					if rd != 0 {
+						self.renaming_table[rd] = [retired_clock, completed_clock];
+					}
+					// 7.2 Functional unit
+					self.function_unit_table[COSIM_INSTRUCTIONS_FU_T[index]] = completed_clock;
+					// 7.3 ROB
+					self.reorder_buffer[self.reorder_buffer_pointer] = retired_clock;
+					self.reorder_buffer_pointer += 1;
+
+					// 8. Update clocks
+					self.clock = retired_clock;
+					self.mmu.clock = self.clock;
+
+					self.write_csr_raw(
+						CSR_INSERT_ADDRESS,
+						self.read_csr_raw(CSR_INSERT_ADDRESS) + 1,
+					);
+				}
+				Err(e) => {
+					// Handle pipeline traps
+					// @TODO: More precise exception and latency calculation
+					self.clock = self.mmu.clock + pipeline_result.1 as u64;
+					self.mmu.clock = self.clock;
+
+					// Flush pipeline
+					self.flush_pipeline();
+					self.handle_exception(e, instruction_address);
+					return;
+				}
+			}
+
+			self.mmu.tick(&mut self.csr[CSR_MIP_ADDRESS as usize]);
+			self.handle_interrupt(self.pc);
+			// self.clock = self.clock.wrapping_add(1);
+
+			// cpu core clock : mtime clock in clint = 8 : 1 is
+			// just an arbiraty ratio.
+			// @TODO: Implement more properly
+			// self.write_csr_raw(CSR_CYCLE_ADDRESS, self.clock * 8);
+			self.write_csr_raw(CSR_MCYCLE_ADDRESS, self.clock);
+			self.write_csr_raw(CSR_HPMCOUNTER3_ADDRESS, self.mmu.l1_cache.hit_num);
+			self.write_csr_raw(CSR_HPMCOUNTER4_ADDRESS, self.mmu.l1_cache.miss_num);
+			self.write_csr_raw(CSR_HPMCOUNTER5_ADDRESS, self.mmu.l2_cache.hit_num);
+			self.write_csr_raw(CSR_HPMCOUNTER6_ADDRESS, self.mmu.l2_cache.miss_num);
+		}
 	}
 
 	pub fn execute_instruction(
@@ -1699,74 +1863,91 @@ impl Cpu {
 		// for example updating page table entry or update peripheral hardware registers.
 		// But ideally disassembling doesn't want to cause any side effect.
 		// How can we avoid side effect?
-		let mut original_word = match self.mmu.fetch_word(self.pc) {
-			Ok(data) => data,
-			Err(_e) => {
-				return format!("PC:{:016x}, InstructionPageFault Trap!\n", self.pc);
-			}
-		};
+		// let mut original_word = match self.mmu.fetch_word(self.pc) {
+		// 	Ok(data) => data,
+		// 	Err(_e) => {
+		// 		return format!("PC:{:016x}, InstructionPageFault Trap!\n", self.pc);
+		// 	}
+		// };
 
-		let word = match (original_word & 0x3) == 0x3 {
-			true => original_word,
-			false => {
-				original_word &= 0xffff;
-				self.uncompress(original_word)
-			}
-		};
+		// let word = match (original_word & 0x3) == 0x3 {
+		// 	true => original_word,
+		// 	false => {
+		// 		original_word &= 0xffff;
+		// 		self.uncompress(original_word)
+		// 	}
+		// };
 
-		let inst = {
-			match self.decode_raw(word) {
-				Ok(inst) => inst,
-				Err(()) => {
-					return format!(
-						"Unknown instruction PC:{:x} WORD:{:x}",
-						self.pc, original_word
-					);
+		match self.instruction_buffer.front() {
+			Some(i) => {
+				let instruction_address = i.0;
+				let word = i.1;
+
+				let inst = {
+					match self.decode_raw(word) {
+						Ok(inst) => inst,
+						Err(()) => {
+							return format!(
+								"Unknown instruction PC:{:x} WORD:{:x}",
+								instruction_address, word
+							);
+						}
+					}
+				};
+
+				let mut s = format!(
+					"PC:{:016x} ",
+					self.unsigned_data(instruction_address as i64)
+				);
+				s += &format!("{:08x} ", word);
+				s += &format!("{} ", inst.name);
+				match inst.dump_type {
+					InstructionDumpType::B => {
+						s += &format!("{}", dump_format_b(self, word, instruction_address, true));
+					}
+					InstructionDumpType::Csr => {
+						s += &format!("{}", dump_format_csr(self, word, instruction_address, true));
+					}
+					InstructionDumpType::I => {
+						s += &format!("{}", dump_format_i(self, word, instruction_address, true));
+					}
+					InstructionDumpType::IMem => {
+						s += &format!(
+							"{}",
+							dump_format_i_mem(self, word, instruction_address, true)
+						);
+					}
+					InstructionDumpType::J => {
+						s += &format!("{}", dump_format_j(self, word, instruction_address, true));
+					}
+					InstructionDumpType::Jalr => {
+						s += &format!(
+							"{}",
+							dump_format_jalr(self, word, instruction_address, true)
+						);
+					}
+					InstructionDumpType::R => {
+						s += &format!("{}", dump_format_r(self, word, instruction_address, true));
+					}
+					InstructionDumpType::R2 => {
+						s += &format!("{}", dump_format_r2(self, word, instruction_address, true));
+					}
+					InstructionDumpType::S => {
+						s += &format!("{}", dump_format_s(self, word, instruction_address, true));
+					}
+					InstructionDumpType::U => {
+						s += &format!("{}", dump_format_u(self, word, instruction_address, true));
+					}
+					InstructionDumpType::Empty => {
+						s += &format!("{}", dump_empty(self, word, instruction_address, true));
+					}
 				}
-			}
-		};
 
-		let mut s = format!("PC:{:016x} ", self.unsigned_data(self.pc as i64));
-		s += &format!("{:08x} ", original_word);
-		s += &format!("{} ", inst.name);
-		match inst.dump_type {
-			InstructionDumpType::B => {
-				s += &format!("{}", dump_format_b(self, word, self.pc, true));
+				// s += &format!("{}", (inst.disassemble)(self, word, self.pc, true));
+				s
 			}
-			InstructionDumpType::Csr => {
-				s += &format!("{}", dump_format_csr(self, word, self.pc, true));
-			}
-			InstructionDumpType::I => {
-				s += &format!("{}", dump_format_i(self, word, self.pc, true));
-			}
-			InstructionDumpType::IMem => {
-				s += &format!("{}", dump_format_i_mem(self, word, self.pc, true));
-			}
-			InstructionDumpType::J => {
-				s += &format!("{}", dump_format_j(self, word, self.pc, true));
-			}
-			InstructionDumpType::Jalr => {
-				s += &format!("{}", dump_format_jalr(self, word, self.pc, true));
-			}
-			InstructionDumpType::R => {
-				s += &format!("{}", dump_format_r(self, word, self.pc, true));
-			}
-			InstructionDumpType::R2 => {
-				s += &format!("{}", dump_format_r2(self, word, self.pc, true));
-			}
-			InstructionDumpType::S => {
-				s += &format!("{}", dump_format_s(self, word, self.pc, true));
-			}
-			InstructionDumpType::U => {
-				s += &format!("{}", dump_format_u(self, word, self.pc, true));
-			}
-			InstructionDumpType::Empty => {
-				s += &format!("{}", dump_empty(self, word, self.pc, true));
-			}
+			None => String::from("Empty instruction buffer"),
 		}
-
-		// s += &format!("{}", (inst.disassemble)(self, word, self.pc, true));
-		s
 	}
 
 	/// Returns mutable `Mmu`
@@ -2494,6 +2675,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 			let f = parse_format_b(word);
 			if cpu.sign_extend(cpu.x[f.rs1]) == cpu.sign_extend(cpu.x[f.rs2]) {
 				cpu.pc = address.wrapping_add(f.imm);
+				cpu.flush_pipeline();
 			}
 			Ok(())
 		},
@@ -2508,6 +2690,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 			let f = parse_format_b(word);
 			if cpu.sign_extend(cpu.x[f.rs1]) >= cpu.sign_extend(cpu.x[f.rs2]) {
 				cpu.pc = address.wrapping_add(f.imm);
+				cpu.flush_pipeline();
 			}
 			Ok(())
 		},
@@ -2522,6 +2705,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 			let f = parse_format_b(word);
 			if cpu.unsigned_data(cpu.x[f.rs1]) >= cpu.unsigned_data(cpu.x[f.rs2]) {
 				cpu.pc = address.wrapping_add(f.imm);
+				cpu.flush_pipeline();
 			}
 			Ok(())
 		},
@@ -2536,6 +2720,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 			let f = parse_format_b(word);
 			if cpu.sign_extend(cpu.x[f.rs1]) < cpu.sign_extend(cpu.x[f.rs2]) {
 				cpu.pc = address.wrapping_add(f.imm);
+				cpu.flush_pipeline();
 			}
 			Ok(())
 		},
@@ -2550,6 +2735,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 			let f = parse_format_b(word);
 			if cpu.unsigned_data(cpu.x[f.rs1]) < cpu.unsigned_data(cpu.x[f.rs2]) {
 				cpu.pc = address.wrapping_add(f.imm);
+				cpu.flush_pipeline();
 			}
 			Ok(())
 		},
@@ -2564,6 +2750,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 			let f = parse_format_b(word);
 			if cpu.sign_extend(cpu.x[f.rs1]) != cpu.sign_extend(cpu.x[f.rs2]) {
 				cpu.pc = address.wrapping_add(f.imm);
+				cpu.flush_pipeline();
 			}
 			Ok(())
 		},
@@ -3176,6 +3363,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 			let f = parse_format_j(word);
 			cpu.x[f.rd] = cpu.sign_extend(cpu.pc as i64);
 			cpu.pc = address.wrapping_add(f.imm);
+			cpu.flush_pipeline();
 			Ok(())
 		},
 		dump_type: InstructionDumpType::J,
@@ -3189,6 +3377,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 			let f = parse_format_i(word);
 			let tmp = cpu.sign_extend(cpu.pc as i64);
 			cpu.pc = (cpu.x[f.rs1] as u64).wrapping_add(f.imm as u64);
+			cpu.flush_pipeline();
 			cpu.x[f.rd] = tmp;
 			Ok(())
 		},
