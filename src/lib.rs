@@ -102,9 +102,13 @@ impl Emulator {
 
 		loop {
 			self.tick();
-		}
 
-		// self.exit();
+			// // Test
+			// if self.cpu.clock > 2000 {
+			//  self.exit();
+			// 	break;
+			// }
+		}
 	}
 
 	/// Method for running [`riscv-tests`](https://github.com/riscv/riscv-tests) program.

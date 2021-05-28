@@ -406,12 +406,15 @@ impl Cpu {
 		let issue_number = cmp::min(self.instruction_buffer.len(), ISSUE_NUM);
 		// println!("Issue {}", issue_number);
 
+		#[cfg(feature = "debug-disassemble")]
+		println!("");
+
 		for _ in 0..issue_number {
 			#[cfg(feature = "debug-disassemble")]
 			{
 				let disas = self.disassemble_next_instruction();
 
-				println!("{}", disas);
+				println!("[{}] {}", self.clock, disas);
 			}
 			let (instruction_address, word, compressed) = match self.instruction_buffer.pop_front()
 			{
@@ -653,6 +656,12 @@ impl Cpu {
 					// 2. Get C(j-1)
 					let completed_clock_functional_unit: u64 =
 						self.function_unit_table[COSIM_INSTRUCTIONS_FU_T[index]];
+					// println!(
+					// 	"  {:?}\n  C[{}]={}",
+					// 	self.function_unit_table,
+					// 	COSIM_INSTRUCTIONS_FU_T[index],
+					// 	completed_clock_functional_unit
+					// );
 
 					// 3. Get L(i)
 					// including mmu latency, always serial
@@ -670,7 +679,7 @@ impl Cpu {
 					let retired_clock: u64 =
 						match completed_clock > self.last_instruction_retired_clock {
 							true => completed_clock,
-							false => self.last_instruction_retired_clock + 1,
+							false => self.last_instruction_retired_clock,
 						};
 
 					// @TODO: 6. multi issue compensation: k
@@ -687,7 +696,9 @@ impl Cpu {
 					self.reorder_buffer[self.reorder_buffer_pointer] = retired_clock;
 					self.reorder_buffer_pointer += 1;
 
+					// println!("  R={}, C={}", retired_clock, completed_clock);
 					// 8. Update clocks
+					self.last_instruction_retired_clock = retired_clock;
 					self.clock = retired_clock;
 					self.mmu.clock = self.clock;
 
@@ -708,6 +719,8 @@ impl Cpu {
 					return;
 				}
 			}
+
+			self.last_instruction_retired_clock += 1;
 
 			self.mmu.tick(&mut self.csr[CSR_MIP_ADDRESS as usize]);
 			self.handle_interrupt(self.pc);
