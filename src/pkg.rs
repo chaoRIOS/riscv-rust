@@ -375,7 +375,11 @@ pub const REG_ADDR_SIZE: usize = 6;
 // Architectural globals
 pub const NR_SB_ENTRIES: usize = 8;
 pub const TRANS_ID_BITS: usize = 3; // log2(NR_SB_ENTRIES)
-pub const ISSUE_NUM: usize = 4;
+
+pub const ISSUE_NUM: usize = 8;
+pub const ROB_CAPACITY: usize = 8;
+pub const INSTUCTION_BUFFER_CAPACITY: usize = 64;
+
 // Impl globals
 pub const LEN_FU: usize = 4;
 pub const LEN_OP: usize = 7;

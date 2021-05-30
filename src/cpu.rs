@@ -5,7 +5,8 @@ use std::collections::VecDeque;
 
 use mmu::{AddressingMode, Mmu};
 use pkg::{
-	COSIM_INSTRUCTIONS, COSIM_INSTRUCTIONS_FORMAT, COSIM_INSTRUCTIONS_FU_T, FU_TYPES, ISSUE_NUM,
+	COSIM_INSTRUCTIONS, COSIM_INSTRUCTIONS_FORMAT, COSIM_INSTRUCTIONS_FU_T, FU_TYPES,
+	INSTUCTION_BUFFER_CAPACITY, ISSUE_NUM, ROB_CAPACITY,
 };
 
 pub const GPR_CAPACITY: usize = 32;
@@ -67,8 +68,8 @@ pub const MIP_SEIP: u64 = 0x200;
 const MIP_STIP: u64 = 0x020;
 const MIP_SSIP: u64 = 0x002;
 
-pub const INSTUCTION_BUFFER_CAPACITY: usize = 64;
-pub const ROB_CAPACITY: usize = 64;
+// pub const INSTUCTION_BUFFER_CAPACITY: usize = 64;
+// pub const ROB_CAPACITY: usize = 8;
 
 /// Emulates a RISC-V CPU core
 pub struct Cpu {
@@ -347,6 +348,9 @@ impl Cpu {
 		// Normalize FU table to last completed operation
 		self.function_unit_table = [*(self.function_unit_table.iter().max().unwrap()); 7];
 		self.reorder_buffer = [0; ROB_CAPACITY];
+
+		// penalty
+		self.last_instruction_retired_clock += 8;
 	}
 
 	/// Runs program one cycle. Fetch, decode, and execution are completed in a cycle so far.
@@ -665,8 +669,11 @@ impl Cpu {
 
 					// 3. Get L(i)
 					// including mmu latency, always serial
-					let functional_unit_latency =
-						(pipeline_result.1 as u64) + self.get_mut_mmu().mmu_latency;
+					let functional_unit_latency = (pipeline_result.1 as u64)
+						+ match COSIM_INSTRUCTIONS[index] {
+							"FENCE" => 0,
+							_ => self.get_mut_mmu().mmu_latency,
+						};
 
 					// 4. Get C(i)
 					// C(i) = L(i) + max[I(i), C(dep), C(j-1)]
@@ -698,6 +705,18 @@ impl Cpu {
 
 					// println!("  R={}, C={}", retired_clock, completed_clock);
 					// 8. Update clocks
+					#[cfg(feature = "debug-disassemble")]
+					{
+						println!(
+							"R:{} C:{} L:{} LR:{} Cdep:{} Cfu:{}",
+							retired_clock,
+							completed_clock,
+							functional_unit_latency,
+							self.last_instruction_retired_clock,
+							completed_clock_dependent,
+							completed_clock_functional_unit
+						)
+					}
 					self.last_instruction_retired_clock = retired_clock;
 					self.clock = retired_clock;
 					self.mmu.clock = self.clock;
@@ -720,8 +739,6 @@ impl Cpu {
 				}
 			}
 
-			self.last_instruction_retired_clock += 1;
-
 			self.mmu.tick(&mut self.csr[CSR_MIP_ADDRESS as usize]);
 			self.handle_interrupt(self.pc);
 			// self.clock = self.clock.wrapping_add(1);
@@ -736,6 +753,7 @@ impl Cpu {
 			self.write_csr_raw(CSR_HPMCOUNTER5_ADDRESS, self.mmu.l2_cache.hit_num);
 			self.write_csr_raw(CSR_HPMCOUNTER6_ADDRESS, self.mmu.l2_cache.miss_num);
 		}
+		self.last_instruction_retired_clock += 1;
 	}
 
 	pub fn execute_instruction(
@@ -748,7 +766,7 @@ impl Cpu {
 	}
 
 	// @TODO: Rename?
-	fn fetch_uncompress(&mut self) -> Result<u32, Trap> {
+	fn _fetch_uncompress(&mut self) -> Result<u32, Trap> {
 		let original_word = match self.fetch() {
 			Ok(word) => word,
 			Err(e) => return Err(e),
@@ -1957,7 +1975,18 @@ impl Cpu {
 				}
 
 				// s += &format!("{}", (inst.disassemble)(self, word, self.pc, true));
-				s
+				#[cfg(feature = "debug-disassemble")]
+				{
+					format!(
+						"[{}] ",
+						COSIM_INSTRUCTIONS_FU_T
+							[self.decode_and_get_instruction_index(word).unwrap()]
+					) + s.as_str()
+				}
+				#[cfg(not(feature = "debug-disassemble"))]
+				{
+					s
+				}
 			}
 			None => String::from("Empty instruction buffer"),
 		}
@@ -2683,7 +2712,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0x0000707f,
 		data: 0x00000063,
 		name: "BEQ",
-		cycles: 2,
+		cycles: 1,
 		operation: |cpu, word, address| {
 			let f = parse_format_b(word);
 			if cpu.sign_extend(cpu.x[f.rs1]) == cpu.sign_extend(cpu.x[f.rs2]) {
@@ -2698,7 +2727,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0x0000707f,
 		data: 0x00005063,
 		name: "BGE",
-		cycles: 2,
+		cycles: 1,
 		operation: |cpu, word, address| {
 			let f = parse_format_b(word);
 			if cpu.sign_extend(cpu.x[f.rs1]) >= cpu.sign_extend(cpu.x[f.rs2]) {
@@ -2713,7 +2742,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0x0000707f,
 		data: 0x00007063,
 		name: "BGEU",
-		cycles: 2,
+		cycles: 1,
 		operation: |cpu, word, address| {
 			let f = parse_format_b(word);
 			if cpu.unsigned_data(cpu.x[f.rs1]) >= cpu.unsigned_data(cpu.x[f.rs2]) {
@@ -2728,7 +2757,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0x0000707f,
 		data: 0x00004063,
 		name: "BLT",
-		cycles: 2,
+		cycles: 1,
 		operation: |cpu, word, address| {
 			let f = parse_format_b(word);
 			if cpu.sign_extend(cpu.x[f.rs1]) < cpu.sign_extend(cpu.x[f.rs2]) {
@@ -2743,7 +2772,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0x0000707f,
 		data: 0x00006063,
 		name: "BLTU",
-		cycles: 2,
+		cycles: 1,
 		operation: |cpu, word, address| {
 			let f = parse_format_b(word);
 			if cpu.unsigned_data(cpu.x[f.rs1]) < cpu.unsigned_data(cpu.x[f.rs2]) {
@@ -2758,7 +2787,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0x0000707f,
 		data: 0x00001063,
 		name: "BNE",
-		cycles: 2,
+		cycles: 1,
 		operation: |cpu, word, address| {
 			let f = parse_format_b(word);
 			if cpu.sign_extend(cpu.x[f.rs1]) != cpu.sign_extend(cpu.x[f.rs2]) {
@@ -3371,7 +3400,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0x0000007f,
 		data: 0x0000006f,
 		name: "JAL",
-		cycles: 2,
+		cycles: 1,
 		operation: |cpu, word, address| {
 			let f = parse_format_j(word);
 			cpu.x[f.rd] = cpu.sign_extend(cpu.pc as i64);
@@ -3385,7 +3414,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0x0000707f,
 		data: 0x00000067,
 		name: "JALR",
-		cycles: 2,
+		cycles: 1,
 		operation: |cpu, word, _address| {
 			let f = parse_format_i(word);
 			let tmp = cpu.sign_extend(cpu.pc as i64);

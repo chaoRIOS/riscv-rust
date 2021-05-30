@@ -22,8 +22,8 @@ pub const L2_CACHE_INDEX_BITS: i32 = 6 + 3;
 pub const L2_CACHE_TAG_BITS: i32 = 32 - L2_CACHE_OFFSET_BITS - L2_CACHE_INDEX_BITS;
 
 /// 64B cache block size
-pub const L2_CACHE_HIT_LATENCY: i32 = 0;
-pub const L2_CACHE_MISS_LATENCY: i32 = 0;
+pub const L2_CACHE_HIT_LATENCY: i32 = 1;
+pub const L2_CACHE_MISS_LATENCY: i32 = 2;
 
 #[derive(Copy, Clone)]
 pub struct L2CacheLine {
