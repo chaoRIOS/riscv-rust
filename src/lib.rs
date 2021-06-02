@@ -10,6 +10,7 @@ use std::process;
 use std::str;
 use std::time::SystemTime;
 
+pub mod branch_predictor;
 pub mod cpu;
 #[cfg(feature = "dramsim")]
 pub mod dram;

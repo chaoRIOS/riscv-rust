@@ -3,10 +3,12 @@ extern crate fnv;
 use std::cmp;
 use std::collections::VecDeque;
 
+use branch_predictor::BranchPredictor;
 use mmu::{AddressingMode, Mmu};
 use pkg::{
 	COSIM_INSTRUCTIONS, COSIM_INSTRUCTIONS_FORMAT, COSIM_INSTRUCTIONS_FU_T, FETCH_NUM, FU_TYPES,
-	INSTUCTION_BUFFER_CAPACITY, ISSUE_NUM, ROB_CAPACITY,
+	INSTUCTION_BUFFER_CAPACITY, ISSUE_NUM, PENALTY_FLUSH_FRONTEND, PENALTY_FLUSH_PIPELINE,
+	ROB_CAPACITY,
 };
 
 pub const GPR_CAPACITY: usize = 32;
@@ -89,6 +91,8 @@ pub struct Cpu {
 	pub pc: u64,
 	pub csr: [u64; CSR_CAPACITY],
 	pub is_compressed: bool,
+
+	pub predictor: BranchPredictor,
 
 	pub instruction_buffer: VecDeque<(u64, u32, bool)>,
 
@@ -266,6 +270,8 @@ impl Cpu {
 			is_compressed: false,
 			instruction_buffer: VecDeque::with_capacity(INSTUCTION_BUFFER_CAPACITY),
 
+			predictor: BranchPredictor::new(),
+
 			renaming_table: [[0; 2]; 32],
 			function_unit_table: [0; 7],
 			reorder_buffer: [0; ROB_CAPACITY],
@@ -341,7 +347,7 @@ impl Cpu {
 	pub fn flush_pipeline(&mut self) {
 		//
 		self.instruction_buffer.clear();
-		// Fulsh renaming table
+		// Flush renaming table
 		self.renaming_table = [*(self
 			.renaming_table
 			.iter()
@@ -350,9 +356,6 @@ impl Cpu {
 		// Normalize FU table to last completed operation
 		self.function_unit_table = [*(self.function_unit_table.iter().max().unwrap()); 7];
 		self.reorder_buffer = [0; ROB_CAPACITY];
-
-		// penalty
-		self.last_instruction_retired_clock += 8;
 	}
 
 	/// Runs program one cycle. Fetch, decode, and execution are completed in a cycle so far.
@@ -366,13 +369,6 @@ impl Cpu {
 		}
 
 		// Multi-issue frontend
-		// println!(
-		// 	"Fetch {}",
-		// 	cmp::min(
-		// 		ISSUE_NUM,
-		// 		INSTUCTION_BUFFER_CAPACITY - self.instruction_buffer.len(),
-		// 	)
-		// );
 		for _ in 0..cmp::min(
 			FETCH_NUM,
 			INSTUCTION_BUFFER_CAPACITY - self.instruction_buffer.len(),
@@ -406,11 +402,9 @@ impl Cpu {
 			};
 		}
 
-		// @TODO: use ROB
-		// should pop min(ROB_ready, IB_len, [ISSUE_NUM]? )
-		// ROB is round-robin, always ready
+		// should pop min(ROB_ready, IB_len, ISSUE_NUM)
+		// ROB is round-robin style, always ready
 		let issue_number = cmp::min(self.instruction_buffer.len(), ISSUE_NUM);
-		// println!("Issue {}", issue_number);
 
 		#[cfg(feature = "debug-disassemble")]
 		println!("");
@@ -430,14 +424,7 @@ impl Cpu {
 				}
 			};
 
-			// if compressed {
-			// 	self.pc = instruction_address + 2;
-			// } else {
-			// 	self.pc = instruction_address + 4;
-			// }
 			self.is_compressed = compressed;
-
-			// let (instruction_address, word) = self.instruction_buffer.pop_front().unwrap();
 
 			#[cfg(feature = "debug-register")]
 			{
@@ -722,6 +709,106 @@ impl Cpu {
 						)
 					}
 					self.last_instruction_retired_clock = retired_clock;
+
+					// Calculate branch prediction
+					match COSIM_INSTRUCTIONS[index] {
+						"BEQ" | "BGE" | "BGEU" | "BLT" | "BLTU" | "BNE" => {
+							// Prediction
+							// (is_taken, address)
+							let (predict_taken, predict_address) =
+								self.predictor.predict(instruction_address);
+
+							let true_pc = match self.instruction_buffer.is_empty() {
+								true => self.pc,
+								false => self.instruction_buffer.front().unwrap().0,
+							};
+
+							let eventually_taken = (true_pc != (instruction_address + 2))
+								&& (true_pc != (instruction_address + 4));
+
+							if eventually_taken {
+								if predict_taken && (true_pc == predict_address) {
+									// Correct prediction
+									#[cfg(feature = "debug-bp")]
+									println!("Correct");
+									self.last_instruction_retired_clock += PENALTY_FLUSH_FRONTEND;
+								} else {
+									// Wrong prediction
+									#[cfg(feature = "debug-bp")]
+									println!("Wrong");
+									self.last_instruction_retired_clock += PENALTY_FLUSH_PIPELINE;
+								}
+							} else {
+								if predict_taken == false {
+									// Correct prediction
+									#[cfg(feature = "debug-bp")]
+									println!("Correct");
+									self.last_instruction_retired_clock += 0;
+								} else {
+									// Wrong prediction
+									#[cfg(feature = "debug-bp")]
+									println!("Wrong");
+									self.last_instruction_retired_clock += PENALTY_FLUSH_PIPELINE;
+								}
+							}
+							#[cfg(feature = "debug-bp")]
+							{
+								println!(
+									"predict {}: 0x{:08x}",
+									match predict_taken {
+										true => "take",
+										false => "no-take",
+									},
+									predict_address
+								);
+								println!(
+									"actually {}: 0x{:08x}",
+									match eventually_taken {
+										true => "take",
+										false => "no-take",
+									},
+									true_pc
+								);
+							}
+
+							self.predictor
+								.update(instruction_address, true_pc, eventually_taken);
+						}
+						"JAL" | "JALR" => {
+							// Prediction
+							// (is_taken, address)
+							let (predict_taken, predict_address) =
+								self.predictor.predict(instruction_address);
+
+							if (predict_taken == true) && (predict_address == self.pc) {
+								// Correct prediction
+								#[cfg(feature = "debug-bp")]
+								println!("Correct");
+								self.last_instruction_retired_clock += PENALTY_FLUSH_FRONTEND;
+							} else {
+								// Wrong prediction
+								#[cfg(feature = "debug-bp")]
+								println!("Wrong");
+								self.last_instruction_retired_clock += PENALTY_FLUSH_PIPELINE;
+							}
+
+							#[cfg(feature = "debug-bp")]
+							{
+								println!(
+									"predict {}: 0x{:08x}",
+									match predict_taken {
+										true => "take",
+										false => "no-take",
+									},
+									predict_address
+								);
+								println!("actually take: 0x{:08x}", self.pc);
+							}
+							self.predictor.update(instruction_address, self.pc, true);
+						}
+						_ => {}
+					}
+
 					self.clock = retired_clock;
 					self.mmu.clock = self.clock;
 
@@ -745,7 +832,6 @@ impl Cpu {
 
 			self.mmu.tick(&mut self.csr[CSR_MIP_ADDRESS as usize]);
 			self.handle_interrupt(self.pc);
-			// self.clock = self.clock.wrapping_add(1);
 
 			// cpu core clock : mtime clock in clint = 8 : 1 is
 			// just an arbiraty ratio.
@@ -2929,7 +3015,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0xfe00707f,
 		data: 0x02004033,
 		name: "DIV",
-		cycles: 128,
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_r(word);
 			let dividend = cpu.x[f.rs1];
@@ -2949,7 +3035,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0xfe00707f,
 		data: 0x02005033,
 		name: "DIVU",
-		cycles: 128,
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_r(word);
 			let dividend = cpu.unsigned_data(cpu.x[f.rs1]);
@@ -2967,7 +3053,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0xfe00707f,
 		data: 0x0200503b,
 		name: "DIVUW",
-		cycles: 128,
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_r(word);
 			let dividend = cpu.unsigned_data(cpu.x[f.rs1]) as u32;
@@ -2985,7 +3071,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0xfe00707f,
 		data: 0x0200403b,
 		name: "DIVW",
-		cycles: 128,
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_r(word);
 			let dividend = cpu.x[f.rs1] as i32;
@@ -3427,7 +3513,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		cycles: 1,
 		operation: |cpu, word, address| {
 			let f = parse_format_i(word);
-			let tmp = cpu.sign_extend(
+			cpu.x[f.rd] = cpu.sign_extend(
 				address as i64
 					+ match cpu.is_compressed {
 						true => 2,
@@ -3436,7 +3522,6 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 			);
 			cpu.pc = (cpu.x[f.rs1] as u64).wrapping_add(f.imm as u64);
 			cpu.flush_pipeline();
-			cpu.x[f.rd] = tmp;
 			Ok(())
 		},
 		dump_type: InstructionDumpType::Jalr,
@@ -3746,7 +3831,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0xfe00707f,
 		data: 0x02006033,
 		name: "REM",
-		cycles: 128,
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_r(word);
 			let dividend = cpu.x[f.rs1];
@@ -3766,7 +3851,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0xfe00707f,
 		data: 0x02007033,
 		name: "REMU",
-		cycles: 128,
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_r(word);
 			let dividend = cpu.unsigned_data(cpu.x[f.rs1]);
@@ -3783,7 +3868,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0xfe00707f,
 		data: 0x0200703b,
 		name: "REMUW",
-		cycles: 128,
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_r(word);
 			let dividend = cpu.x[f.rs1] as u32;
@@ -3800,7 +3885,7 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		mask: 0xfe00707f,
 		data: 0x0200603b,
 		name: "REMW",
-		cycles: 128,
+		cycles: 10,
 		operation: |cpu, word, _address| {
 			let f = parse_format_r(word);
 			let dividend = cpu.x[f.rs1] as i32;

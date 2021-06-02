@@ -14,3 +14,4 @@ riscv_emu_rust = {path = "../" ,default-features = false, optional = true}
 default = ["riscv_emu_rust"]
 debug-disassemble = ["riscv_emu_rust","riscv_emu_rust/debug-disassemble"]
 debug-register = ["riscv_emu_rust","riscv_emu_rust/debug-register"]
+debug-bp = ["riscv_emu_rust","riscv_emu_rust/debug-bp"]

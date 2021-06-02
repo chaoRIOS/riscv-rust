@@ -21,12 +21,13 @@ default = []
 dramsim = []
 memdump = []
 
-debug = ["debug-cache", "debug-dramsim", "debug-disassemble", "debug-tohost", "debug-register"]
+debug = ["debug-cache", "debug-dramsim", "debug-disassemble", "debug-tohost", "debug-register","debug-bp"]
 debug-cache = []
 debug-dramsim = ["dramsim"]
 debug-disassemble = []
 debug-register = []
 debug-tohost = []
+debug-bp = ["debug-disassemble"]
 
 [badges]
 travis-ci = { repository = "takahirox/riscv-rust" }
