@@ -376,8 +376,9 @@ pub const REG_ADDR_SIZE: usize = 6;
 pub const NR_SB_ENTRIES: usize = 8;
 pub const TRANS_ID_BITS: usize = 3; // log2(NR_SB_ENTRIES)
 
-pub const ISSUE_NUM: usize = 8;
-pub const ROB_CAPACITY: usize = 8;
+pub const FETCH_NUM: usize = 32;
+pub const ISSUE_NUM: usize = 2;
+pub const ROB_CAPACITY: usize = 4;
 pub const INSTUCTION_BUFFER_CAPACITY: usize = 64;
 
 // Impl globals

@@ -5,7 +5,7 @@ use std::collections::VecDeque;
 
 use mmu::{AddressingMode, Mmu};
 use pkg::{
-	COSIM_INSTRUCTIONS, COSIM_INSTRUCTIONS_FORMAT, COSIM_INSTRUCTIONS_FU_T, FU_TYPES,
+	COSIM_INSTRUCTIONS, COSIM_INSTRUCTIONS_FORMAT, COSIM_INSTRUCTIONS_FU_T, FETCH_NUM, FU_TYPES,
 	INSTUCTION_BUFFER_CAPACITY, ISSUE_NUM, ROB_CAPACITY,
 };
 
@@ -88,6 +88,7 @@ pub struct Cpu {
 	pub f: [f64; GPR_CAPACITY],
 	pub pc: u64,
 	pub csr: [u64; CSR_CAPACITY],
+	pub is_compressed: bool,
 
 	pub instruction_buffer: VecDeque<(u64, u32, bool)>,
 
@@ -262,6 +263,7 @@ impl Cpu {
 			x: [0; 32],
 			f: [0.0; 32],
 			pc: 0,
+			is_compressed: false,
 			instruction_buffer: VecDeque::with_capacity(INSTUCTION_BUFFER_CAPACITY),
 
 			renaming_table: [[0; 2]; 32],
@@ -372,7 +374,7 @@ impl Cpu {
 		// 	)
 		// );
 		for _ in 0..cmp::min(
-			ISSUE_NUM,
+			FETCH_NUM,
 			INSTUCTION_BUFFER_CAPACITY - self.instruction_buffer.len(),
 		) {
 			match self.fetch() {
@@ -428,11 +430,13 @@ impl Cpu {
 				}
 			};
 
-			if compressed {
-				self.pc = instruction_address + 2;
-			} else {
-				self.pc = instruction_address + 4;
-			}
+			// if compressed {
+			// 	self.pc = instruction_address + 2;
+			// } else {
+			// 	self.pc = instruction_address + 4;
+			// }
+			self.is_compressed = compressed;
+
 			// let (instruction_address, word) = self.instruction_buffer.pop_front().unwrap();
 
 			#[cfg(feature = "debug-register")]
@@ -705,7 +709,7 @@ impl Cpu {
 
 					// println!("  R={}, C={}", retired_clock, completed_clock);
 					// 8. Update clocks
-					#[cfg(feature = "debug-disassemble")]
+					#[cfg(feature = "debug-calculate")]
 					{
 						println!(
 							"R:{} C:{} L:{} LR:{} Cdep:{} Cfu:{}",
@@ -1974,19 +1978,19 @@ impl Cpu {
 					}
 				}
 
-				// s += &format!("{}", (inst.disassemble)(self, word, self.pc, true));
-				#[cfg(feature = "debug-disassemble")]
-				{
-					format!(
-						"[{}] ",
-						COSIM_INSTRUCTIONS_FU_T
-							[self.decode_and_get_instruction_index(word).unwrap()]
-					) + s.as_str()
-				}
-				#[cfg(not(feature = "debug-disassemble"))]
-				{
-					s
-				}
+				s
+				// #[cfg(feature = "debug-disassemble")]
+				// {
+				// 	format!(
+				// 		"[{}] ",
+				// 		COSIM_INSTRUCTIONS_FU_T
+				// 			[self.decode_and_get_instruction_index(word).unwrap()]
+				// 	) + s.as_str()
+				// }
+				// #[cfg(not(feature = "debug-disassemble"))]
+				// {
+				// 	s
+				// }
 			}
 			None => String::from("Empty instruction buffer"),
 		}
@@ -3403,7 +3407,13 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		cycles: 1,
 		operation: |cpu, word, address| {
 			let f = parse_format_j(word);
-			cpu.x[f.rd] = cpu.sign_extend(cpu.pc as i64);
+			cpu.x[f.rd] = cpu.sign_extend(
+				address as i64
+					+ match cpu.is_compressed {
+						true => 2,
+						false => 4,
+					},
+			);
 			cpu.pc = address.wrapping_add(f.imm);
 			cpu.flush_pipeline();
 			Ok(())
@@ -3415,9 +3425,15 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		data: 0x00000067,
 		name: "JALR",
 		cycles: 1,
-		operation: |cpu, word, _address| {
+		operation: |cpu, word, address| {
 			let f = parse_format_i(word);
-			let tmp = cpu.sign_extend(cpu.pc as i64);
+			let tmp = cpu.sign_extend(
+				address as i64
+					+ match cpu.is_compressed {
+						true => 2,
+						false => 4,
+					},
+			);
 			cpu.pc = (cpu.x[f.rs1] as u64).wrapping_add(f.imm as u64);
 			cpu.flush_pipeline();
 			cpu.x[f.rd] = tmp;

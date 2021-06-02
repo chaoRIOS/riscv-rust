@@ -30,7 +30,7 @@ use dram::{send_request, terminate_pipe};
 use elf_analyzer::ElfAnalyzer;
 use l1cache::L1_CACHE_HIT_LATENCY;
 use l2cache::L2_CACHE_HIT_LATENCY;
-use pkg::{INSTUCTION_BUFFER_CAPACITY, ISSUE_NUM, ROB_CAPACITY};
+// use pkg::{INSTUCTION_BUFFER_CAPACITY, ISSUE_NUM, ROB_CAPACITY};
 
 /// RISC-V emulator. It emulates RISC-V CPU and peripheral devices.
 ///
@@ -105,7 +105,7 @@ impl Emulator {
 			self.tick();
 
 			// // Test
-			// if self.cpu.clock > 1000 {
+			// if self.cpu.clock > 730  {
 			// 	self.exit();
 			// 	break;
 			// }
