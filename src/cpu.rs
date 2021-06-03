@@ -55,11 +55,12 @@ const _CSR_CYCLE_ADDRESS: u16 = 0xc00;
 const CSR_TIME_ADDRESS: u16 = 0xc01;
 pub const CSR_INSERT_ADDRESS: u16 = 0xc02;
 
-pub const CSR_HPMCOUNTER3_ADDRESS: u16 = 0xc03;
-pub const CSR_HPMCOUNTER4_ADDRESS: u16 = 0xc04;
-pub const CSR_HPMCOUNTER5_ADDRESS: u16 = 0xc05;
-pub const CSR_HPMCOUNTER6_ADDRESS: u16 = 0xc06;
-pub const _CSR_HPMCOUNTER7_ADDRESS: u16 = 0xc07;
+pub const CSR_HPMCOUNTER3_ADDRESS: u16 = 0xc03; // l1 hit
+pub const CSR_HPMCOUNTER4_ADDRESS: u16 = 0xc04; // l1 miss
+pub const CSR_HPMCOUNTER5_ADDRESS: u16 = 0xc05; // l2 hit
+pub const CSR_HPMCOUNTER6_ADDRESS: u16 = 0xc06; // l2 miss
+pub const CSR_HPMCOUNTER7_ADDRESS: u16 = 0xc07; // Correct prediction
+pub const CSR_HPMCOUNTER8_ADDRESS: u16 = 0xc08; // Wrong prediction
 
 const _CSR_MHARTID_ADDRESS: u16 = 0xf14;
 
@@ -69,9 +70,6 @@ pub const MIP_MSIP: u64 = 0x008;
 pub const MIP_SEIP: u64 = 0x200;
 const MIP_STIP: u64 = 0x020;
 const MIP_SSIP: u64 = 0x002;
-
-// pub const INSTUCTION_BUFFER_CAPACITY: usize = 64;
-// pub const ROB_CAPACITY: usize = 8;
 
 /// Emulates a RISC-V CPU core
 pub struct Cpu {
@@ -731,11 +729,19 @@ impl Cpu {
 									// Correct prediction
 									#[cfg(feature = "debug-bp")]
 									println!("Correct");
+									self.write_csr_raw(
+										CSR_HPMCOUNTER7_ADDRESS,
+										self.read_csr_raw(CSR_HPMCOUNTER7_ADDRESS) + 1,
+									);
 									self.last_instruction_retired_clock += PENALTY_FLUSH_FRONTEND;
 								} else {
 									// Wrong prediction
 									#[cfg(feature = "debug-bp")]
 									println!("Wrong");
+									self.write_csr_raw(
+										CSR_HPMCOUNTER8_ADDRESS,
+										self.read_csr_raw(CSR_HPMCOUNTER8_ADDRESS) + 1,
+									);
 									self.last_instruction_retired_clock += PENALTY_FLUSH_PIPELINE;
 								}
 							} else {
@@ -743,11 +749,19 @@ impl Cpu {
 									// Correct prediction
 									#[cfg(feature = "debug-bp")]
 									println!("Correct");
+									self.write_csr_raw(
+										CSR_HPMCOUNTER7_ADDRESS,
+										self.read_csr_raw(CSR_HPMCOUNTER7_ADDRESS) + 1,
+									);
 									self.last_instruction_retired_clock += 0;
 								} else {
 									// Wrong prediction
 									#[cfg(feature = "debug-bp")]
 									println!("Wrong");
+									self.write_csr_raw(
+										CSR_HPMCOUNTER8_ADDRESS,
+										self.read_csr_raw(CSR_HPMCOUNTER8_ADDRESS) + 1,
+									);
 									self.last_instruction_retired_clock += PENALTY_FLUSH_PIPELINE;
 								}
 							}
@@ -784,11 +798,19 @@ impl Cpu {
 								// Correct prediction
 								#[cfg(feature = "debug-bp")]
 								println!("Correct");
+								self.write_csr_raw(
+									CSR_HPMCOUNTER7_ADDRESS,
+									self.read_csr_raw(CSR_HPMCOUNTER7_ADDRESS) + 1,
+								);
 								self.last_instruction_retired_clock += PENALTY_FLUSH_FRONTEND;
 							} else {
 								// Wrong prediction
 								#[cfg(feature = "debug-bp")]
 								println!("Wrong");
+								self.write_csr_raw(
+									CSR_HPMCOUNTER8_ADDRESS,
+									self.read_csr_raw(CSR_HPMCOUNTER8_ADDRESS) + 1,
+								);
 								self.last_instruction_retired_clock += PENALTY_FLUSH_PIPELINE;
 							}
 

@@ -24,7 +24,8 @@ pub mod rob;
 
 use cpu::{
 	Cpu, Xlen, CSR_HPMCOUNTER3_ADDRESS, CSR_HPMCOUNTER4_ADDRESS, CSR_HPMCOUNTER5_ADDRESS,
-	CSR_HPMCOUNTER6_ADDRESS, CSR_INSERT_ADDRESS, CSR_MCYCLE_ADDRESS,
+	CSR_HPMCOUNTER6_ADDRESS, CSR_HPMCOUNTER7_ADDRESS, CSR_HPMCOUNTER8_ADDRESS, CSR_INSERT_ADDRESS,
+	CSR_MCYCLE_ADDRESS,
 };
 #[cfg(feature = "dramsim")]
 use dram::{send_request, terminate_pipe};
@@ -202,6 +203,15 @@ impl Emulator {
 			(self.cpu.read_csr_raw(CSR_INSERT_ADDRESS) as f32)
 				/ (self.cpu.read_csr_raw(CSR_MCYCLE_ADDRESS) as f32)
 		);
+
+		let correct_predictions = self.cpu.read_csr_raw(CSR_HPMCOUNTER7_ADDRESS);
+		let wrong_predictions = self.cpu.read_csr_raw(CSR_HPMCOUNTER8_ADDRESS);
+		println!(
+			"BP accuracy = {}%",
+			100f32 * (correct_predictions as f32)
+				/ (correct_predictions as f32 + wrong_predictions as f32)
+		);
+
 		// L1 Cache hit/miss
 		let l1_hit_num = self.cpu.read_csr_raw(CSR_HPMCOUNTER3_ADDRESS);
 		let l1_miss_num = self.cpu.read_csr_raw(CSR_HPMCOUNTER4_ADDRESS);
