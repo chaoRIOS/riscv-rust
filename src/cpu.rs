@@ -3800,7 +3800,10 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		cycles: 1,
 		operation: |cpu, _word, _address| {
 			cpu.pc = match cpu.read_csr(CSR_MEPC_ADDRESS) {
-				Ok(data) => data,
+				Ok(data) => {
+					cpu.flush_pipeline();
+					data
+				}
 				Err(e) => return Err(e),
 			};
 			let status = cpu.read_csr_raw(CSR_MSTATUS_ADDRESS);
@@ -4193,7 +4196,10 @@ const INSTRUCTIONS: [Instruction; INSTRUCTION_NUM] = [
 		operation: |cpu, _word, _address| {
 			// @TODO: Throw error if higher privilege return instruction is executed
 			cpu.pc = match cpu.read_csr(CSR_SEPC_ADDRESS) {
-				Ok(data) => data,
+				Ok(data) => {
+					cpu.flush_pipeline();
+					data
+				}
 				Err(e) => return Err(e),
 			};
 			let status = cpu.read_csr_raw(CSR_SSTATUS_ADDRESS);

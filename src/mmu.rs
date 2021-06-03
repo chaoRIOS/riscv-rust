@@ -175,7 +175,9 @@ impl Mmu {
 	fn get_effective_address(&self, address: u64) -> u64 {
 		match self.xlen {
 			Xlen::Bit32 => address & 0xffffffff,
-			Xlen::Bit64 => address,
+			// @TODO: Special configure for lab1
+			// should be 0x7f_ffff_ffff
+			Xlen::Bit64 => address & 0xffff_ffff,
 		}
 	}
 
@@ -723,15 +725,35 @@ impl Mmu {
 					let _l1_tag: u64 = p_address >> (L1_CACHE_INDEX_BITS + L1_CACHE_OFFSET_BITS);
 					let l1_offset = p_address & ((1 << L1_CACHE_OFFSET_BITS) - 1);
 
-					let l1_way = match self.aquire_cache_line(p_address) {
-						Ok(l1_way) => l1_way,
-						Err(trap) => return Err(trap),
-					};
+					if l1_offset + width > 64 {
+						let widths = (64 - l1_offset, l1_offset + width - 64);
+						let l1_way = match self.aquire_cache_line(p_address) {
+							Ok(l1_way) => l1_way,
+							Err(trap) => return Err(trap),
+						};
+						let mut result = self.l1_cache.data[l1_index as usize].data
+							[l1_way as usize]
+							.get(l1_offset, widths.0);
+						let l1_way = match self.aquire_cache_line(p_address + 64) {
+							Ok(l1_way) => l1_way,
+							Err(trap) => return Err(trap),
+						};
+						result = result
+							| (self.l1_cache.data[l1_index as usize].data[l1_way as usize]
+								.get(0, widths.1)) << (widths.0 * 8);
+						self.mmu_latency = self.clock - self.mmu_latency;
+						Ok(result)
+					} else {
+						let l1_way = match self.aquire_cache_line(p_address) {
+							Ok(l1_way) => l1_way,
+							Err(trap) => return Err(trap),
+						};
 
-					self.mmu_latency = self.clock - self.mmu_latency;
+						self.mmu_latency = self.clock - self.mmu_latency;
 
-					Ok(self.l1_cache.data[l1_index as usize].data[l1_way as usize]
-						.get(l1_offset, width))
+						Ok(self.l1_cache.data[l1_index as usize].data[l1_way as usize]
+							.get(l1_offset, width))
+					}
 				}
 				Err(()) => Err(Trap {
 					trap_type: TrapType::LoadPageFault,
@@ -833,17 +855,38 @@ impl Mmu {
 					let _l1_tag: u64 = p_address >> (L1_CACHE_INDEX_BITS + L1_CACHE_OFFSET_BITS);
 					let l1_offset = p_address & ((1 << L1_CACHE_OFFSET_BITS) - 1);
 
-					let l1_way = match self.aquire_cache_line(p_address) {
-						Ok(l1_way) => l1_way,
-						Err(trap) => return Err(trap),
-					};
+					if l1_offset + width > 64 {
+						let widths = (64 - l1_offset, l1_offset + width - 64);
+						let l1_way = match self.aquire_cache_line(p_address) {
+							Ok(l1_way) => l1_way,
+							Err(trap) => return Err(trap),
+						};
+						self.l1_cache.data[l1_index as usize].data[l1_way as usize].set(
+							l1_offset,
+							widths.0,
+							value & ((1 << (widths.0 * 8)) - 1),
+						);
+						let l1_way = match self.aquire_cache_line(p_address + 64) {
+							Ok(l1_way) => l1_way,
+							Err(trap) => return Err(trap),
+						};
+						self.l1_cache.data[l1_index as usize].data[l1_way as usize].set(
+							0,
+							widths.1,
+							(value >> (widths.0 * 8)) & ((1 << (widths.1 * 8)) - 1),
+						);
+						self.mmu_latency = self.clock - self.mmu_latency;
+					} else {
+						let l1_way = match self.aquire_cache_line(p_address) {
+							Ok(l1_way) => l1_way,
+							Err(trap) => return Err(trap),
+						};
+						// Update cache line
+						self.l1_cache.data[l1_index as usize].data[l1_way as usize]
+							.set(l1_offset, width, value);
 
-					self.mmu_latency = self.clock - self.mmu_latency;
-
-					// Update cache line
-					self.l1_cache.data[l1_index as usize].data[l1_way as usize]
-						.set(l1_offset, width, value);
-
+						self.mmu_latency = self.clock - self.mmu_latency;
+					}
 					Ok(())
 				}
 				Err(()) => Err(Trap {
