@@ -304,7 +304,8 @@ impl Emulator {
 		{
 			Some(address) => address,
 			// None => 0x80001ea8,
-			None => 0x80001198,
+			// @TODO: special config for lab3
+			None => 0x80000000,
 		};
 		self.cpu.tohost_addr = self.tohost_addr;
 
