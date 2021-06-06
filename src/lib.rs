@@ -20,17 +20,23 @@ pub mod l2cache;
 pub mod memory;
 pub mod mmu;
 pub mod pkg;
-pub mod rob;
 
 use cpu::{
-	Cpu, Xlen, CSR_HPMCOUNTER3_ADDRESS, CSR_HPMCOUNTER4_ADDRESS, CSR_HPMCOUNTER5_ADDRESS,
-	CSR_HPMCOUNTER6_ADDRESS, CSR_HPMCOUNTER7_ADDRESS, CSR_HPMCOUNTER8_ADDRESS, CSR_INSERT_ADDRESS,
+	Cpu, Xlen, CSR_HPMCOUNTER7_ADDRESS, CSR_HPMCOUNTER8_ADDRESS, CSR_INSERT_ADDRESS,
 	CSR_MCYCLE_ADDRESS,
+};
+
+#[cfg(feature = "statistics-cache")]
+use cpu::{
+	CSR_HPMCOUNTER3_ADDRESS, CSR_HPMCOUNTER4_ADDRESS, CSR_HPMCOUNTER5_ADDRESS,
+	CSR_HPMCOUNTER6_ADDRESS,
 };
 #[cfg(feature = "dramsim")]
 use dram::{send_request, terminate_pipe};
 use elf_analyzer::ElfAnalyzer;
+#[cfg(feature = "statistics-cache")]
 use l1cache::L1_CACHE_HIT_LATENCY;
+#[cfg(feature = "statistics-cache")]
 use l2cache::L2_CACHE_HIT_LATENCY;
 // use pkg::{INSTUCTION_BUFFER_CAPACITY, ISSUE_NUM, ROB_CAPACITY};
 
@@ -212,35 +218,37 @@ impl Emulator {
 				/ (correct_predictions as f32 + wrong_predictions as f32)
 		);
 
-		// L1 Cache hit/miss
-		let l1_hit_num = self.cpu.read_csr_raw(CSR_HPMCOUNTER3_ADDRESS);
-		let l1_miss_num = self.cpu.read_csr_raw(CSR_HPMCOUNTER4_ADDRESS);
-		// L2 Cache hit/miss
-		let _l2_hit_num = self.cpu.read_csr_raw(CSR_HPMCOUNTER5_ADDRESS);
-		let l2_miss_num = self.cpu.read_csr_raw(CSR_HPMCOUNTER6_ADDRESS);
-		println!(
-			"Cache Hit rate = {}%",
-			100f32 * (1f32 - (l2_miss_num as f32 / (l1_hit_num + l1_miss_num) as f32))
-		);
-		println!(
-			"Cache Miss rate = {}%",
-			((l2_miss_num * 100) as f32 / (l1_hit_num + l1_miss_num) as f32) as f32
-		);
+		#[cfg(feature = "statistics-cache")]
+		{
+			// L1 Cache hit/miss
+			let l1_hit_num = self.cpu.read_csr_raw(CSR_HPMCOUNTER3_ADDRESS);
+			let l1_miss_num = self.cpu.read_csr_raw(CSR_HPMCOUNTER4_ADDRESS);
+			// L2 Cache hit/miss
+			let _l2_hit_num = self.cpu.read_csr_raw(CSR_HPMCOUNTER5_ADDRESS);
+			let l2_miss_num = self.cpu.read_csr_raw(CSR_HPMCOUNTER6_ADDRESS);
+			println!(
+				"Cache Hit rate = {}%",
+				100f32 * (1f32 - (l2_miss_num as f32 / (l1_hit_num + l1_miss_num) as f32))
+			);
+			println!(
+				"Cache Miss rate = {}%",
+				((l2_miss_num * 100) as f32 / (l1_hit_num + l1_miss_num) as f32) as f32
+			);
 
-		// Average hit latency
-		println!(
-			"Cache Hit Latency = {} cycles",
-			(l1_hit_num as f32 * L1_CACHE_HIT_LATENCY as f32
-				+ l1_miss_num as f32 * L2_CACHE_HIT_LATENCY as f32)
-				/ (l1_hit_num as f32 + l1_miss_num as f32)
-		);
+			// Average hit latency
+			println!(
+				"Cache Hit Latency = {} cycles",
+				(l1_hit_num as f32 * L1_CACHE_HIT_LATENCY as f32
+					+ l1_miss_num as f32 * L2_CACHE_HIT_LATENCY as f32)
+					/ (l1_hit_num as f32 + l1_miss_num as f32)
+			);
 
-		// Average miss latency
-		println!(
-			"Cache Miss Latency = {} cycles",
-			(self.cpu.mmu.dram_latency as f32) / (l2_miss_num as f32)
-		);
-
+			// Average miss latency
+			println!(
+				"Cache Miss Latency = {} cycles",
+				(self.cpu.mmu.dram_latency as f32) / (l2_miss_num as f32)
+			);
+		}
 		let exit_time = SystemTime::now()
 			.duration_since(SystemTime::UNIX_EPOCH)
 			.unwrap()

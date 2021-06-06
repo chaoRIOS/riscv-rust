@@ -377,21 +377,25 @@ pub const NR_SB_ENTRIES: usize = 8;
 pub const TRANS_ID_BITS: usize = 3; // log2(NR_SB_ENTRIES)
 
 pub const FETCH_NUM: usize = 32;
-pub const ISSUE_NUM: usize = 2;
+pub const ISSUE_NUM: usize = 3;
 pub const ROB_CAPACITY: usize = 8;
 pub const INSTUCTION_BUFFER_CAPACITY: usize = 64;
 
 pub const BTB_ROWS: usize = usize::pow(2, BTB_INDEX_BITS as u32);
 pub const BTB_COLUMNS: usize = usize::pow(2, BTB_OFFSET_BITS as u32);
-pub const BTB_INDEX_BITS: i32 = 4;
-pub const BTB_OFFSET_BITS: i32 = 8;
+pub const BTB_INDEX_BITS: i32 = 6;
+pub const BTB_OFFSET_BITS: i32 = 5;
 
 pub const BHT_ROWS: usize = usize::pow(2, BHT_INDEX_BITS as u32);
 pub const BHT_COLUMNS: usize = usize::pow(2, BHT_OFFSET_BITS as u32);
-pub const BHT_INDEX_BITS: i32 = 4;
-pub const BHT_OFFSET_BITS: i32 = 8;
+pub const BHT_INDEX_BITS: i32 = 6;
+pub const BHT_OFFSET_BITS: i32 = 5;
+pub const BHT_BITS: i32 = 2;
+pub const BHT_MAX_VALUE: i32 = i32::pow(2, BHT_BITS as u32) - 1;
+pub const BHT_MIN_VALUE: i32 = 0;
+pub const BHT_TAKEN_VALUE: i32 = BHT_MIN_VALUE + (BHT_MAX_VALUE + BHT_MIN_VALUE) / 2 + 1;
 
-pub const PENALTY_FLUSH_PIPELINE: u64 = 4;
+pub const PENALTY_FLUSH_PIPELINE: u64 = 8;
 pub const PENALTY_FLUSH_FRONTEND: u64 = 2;
 
 // Impl globals

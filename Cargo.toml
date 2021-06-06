@@ -21,6 +21,8 @@ default = []
 dramsim = []
 memdump = []
 
+statistics-cache = []
+
 debug = ["debug-cache", "debug-dramsim", "debug-disassemble", "debug-tohost", "debug-register","debug-bp","debug-calculate"]
 debug-cache = []
 debug-dramsim = ["dramsim"]

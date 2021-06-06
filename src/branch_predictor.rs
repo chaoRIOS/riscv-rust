@@ -1,8 +1,8 @@
 use std::cmp;
 
 use pkg::{
-	BHT_COLUMNS, BHT_INDEX_BITS, BHT_OFFSET_BITS, BHT_ROWS, BTB_COLUMNS, BTB_INDEX_BITS,
-	BTB_OFFSET_BITS, BTB_ROWS,
+	BHT_COLUMNS, BHT_INDEX_BITS, BHT_MAX_VALUE, BHT_MIN_VALUE, BHT_OFFSET_BITS, BHT_ROWS,
+	BHT_TAKEN_VALUE, BTB_COLUMNS, BTB_INDEX_BITS, BTB_OFFSET_BITS, BTB_ROWS,
 };
 
 pub struct BranchPredictor {
@@ -107,22 +107,24 @@ impl BTBEntry {
 
 #[derive(Copy, Clone)]
 pub struct BHTEntry {
-	taken: i8,
+	taken: i32,
 }
 
 impl BHTEntry {
 	pub fn new() -> Self {
-		BHTEntry { taken: 1 }
+		BHTEntry {
+			taken: BHT_TAKEN_VALUE - 1,
+		}
 	}
 
 	pub fn is_taken(&self) -> bool {
-		self.taken >= 2
+		self.taken >= BHT_TAKEN_VALUE
 	}
 
 	pub fn update(&mut self, eventually_taken: bool) {
 		match eventually_taken {
-			true => self.taken = cmp::min(self.taken + 1, 3),
-			false => self.taken = cmp::max(self.taken - 1, 0),
+			true => self.taken = cmp::min(self.taken + 1, BHT_MAX_VALUE),
+			false => self.taken = cmp::max(self.taken - 1, BHT_MIN_VALUE),
 		}
 	}
 }
