@@ -113,7 +113,7 @@ impl Emulator {
 			self.tick();
 
 			// // Test
-			// if self.cpu.clock > 730  {
+			// if self.cpu.clock > 78 {
 			// 	self.exit();
 			// 	break;
 			// }

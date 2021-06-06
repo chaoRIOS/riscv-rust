@@ -358,6 +358,9 @@ impl Cpu {
 
 	/// Runs program one cycle. Fetch, decode, and execution are completed in a cycle so far.
 	pub fn tick(&mut self) {
+		#[cfg(feature = "debug-disassemble")]
+		println!("");
+
 		if self.wfi {
 			if (self.read_csr_raw(CSR_MIE_ADDRESS) & self.read_csr_raw(CSR_MIP_ADDRESS)) != 0 {
 				self.wfi = false;
@@ -373,7 +376,7 @@ impl Cpu {
 		) {
 			match self.fetch() {
 				Ok(word) => {
-					// println!("Fetch 0x{:08x}", instruction_address);
+					// println!("Fetching 0x{:08x}", self.pc);
 
 					match (word & 0x3) == 0x3 {
 						true => {
@@ -404,9 +407,6 @@ impl Cpu {
 		// ROB is round-robin style, always ready
 		let issue_number = cmp::min(self.instruction_buffer.len(), ISSUE_NUM);
 
-		#[cfg(feature = "debug-disassemble")]
-		println!("");
-
 		for _ in 0..issue_number {
 			#[cfg(feature = "debug-disassemble")]
 			{
@@ -426,40 +426,8 @@ impl Cpu {
 
 			#[cfg(feature = "debug-register")]
 			{
-				println!("{}  : 0x{:016x}", "pc", self.pc);
-				println!(
-					"{}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} ",
-					"zero", self.x[0], "ra", self.x[1], "sp", self.x[2], "gp", self.x[3]
-				);
-				println!(
-					"{}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} ",
-					"tp", self.x[4], "t0", self.x[5], "t1", self.x[6], "t2", self.x[7]
-				);
-				println!(
-					"{}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} ",
-					"s0", self.x[8], "s1", self.x[9], "a0", self.x[10], "a1", self.x[11]
-				);
-				println!(
-					"{}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} ",
-					"a2", self.x[12], "a3", self.x[13], "a4", self.x[14], "a5", self.x[15]
-				);
-				println!(
-					"{}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} ",
-					"a6", self.x[16], "a7", self.x[17], "s2", self.x[18], "s3", self.x[19]
-				);
-				println!(
-					"{}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} ",
-					"s4", self.x[20], "s5", self.x[21], "s6", self.x[22], "s7", self.x[23]
-				);
-				println!(
-					"{}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} ",
-					"s8", self.x[24], "s9", self.x[25], "s10", self.x[26], "s11", self.x[27]
-				);
-				println!(
-					"{}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} ",
-					"t3", self.x[28], "t4", self.x[29], "t5", self.x[30], "t6", self.x[31]
-				);
-				println!("{}  : 0x{:016x}", "mstatus", self.csr[0x300]);
+				println!("[Before]");
+				self.print_registers();
 			}
 			// Enter ROB
 			if self.reorder_buffer_pointer >= ROB_CAPACITY {
@@ -472,10 +440,8 @@ impl Cpu {
 
 			let decode_result = self.decode(word, instruction_address);
 
-			// Extra exit after decode stage, because we handle to/from host operation in decode stage.
-			// Currently detect as exit when
-			// * tohost address is set
-			// * JAL to the identical address
+			// Enter EX
+			// 1. operate functionality
 			let pipeline_result = match decode_result {
 				Ok(inst) => {
 					let cycles = inst.cycles;
@@ -484,6 +450,10 @@ impl Cpu {
 
 					(result, cycles)
 				}
+				// Extra exit after decode stage, because we handle to/from host operation in decode stage.
+				// Currently detect as exit when
+				// * tohost address is set
+				// * JAL to the identical address
 				Err("exit") => {
 					self.exit_signal = true;
 					return;
@@ -508,44 +478,10 @@ impl Cpu {
 
 			#[cfg(feature = "debug-register")]
 			{
-				println!("{}  : 0x{:016x}", "pc", self.pc);
-				println!(
-					"{}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} ",
-					"zero", self.x[0], "ra", self.x[1], "sp", self.x[2], "gp", self.x[3]
-				);
-				println!(
-					"{}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} ",
-					"tp", self.x[4], "t0", self.x[5], "t1", self.x[6], "t2", self.x[7]
-				);
-				println!(
-					"{}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} ",
-					"s0", self.x[8], "s1", self.x[9], "a0", self.x[10], "a1", self.x[11]
-				);
-				println!(
-					"{}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} ",
-					"a2", self.x[12], "a3", self.x[13], "a4", self.x[14], "a5", self.x[15]
-				);
-				println!(
-					"{}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} ",
-					"a6", self.x[16], "a7", self.x[17], "s2", self.x[18], "s3", self.x[19]
-				);
-				println!(
-					"{}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} ",
-					"s4", self.x[20], "s5", self.x[21], "s6", self.x[22], "s7", self.x[23]
-				);
-				println!(
-					"{}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} ",
-					"s8", self.x[24], "s9", self.x[25], "s10", self.x[26], "s11", self.x[27]
-				);
-				println!(
-					"{}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} ",
-					"t3", self.x[28], "t4", self.x[29], "t5", self.x[30], "t6", self.x[31]
-				);
-				println!("{}  : 0x{:016x}", "mstatus", self.csr[0x300]);
+				println!("[After]");
+				self.print_registers();
 			}
 
-			// Enter EX
-			// 1. operate functionality
 			// 2. calculate timing
 			match pipeline_result.0 {
 				Ok(()) => {
@@ -989,13 +925,7 @@ impl Cpu {
 	/// instead of `decode`.
 	pub fn decode_raw(&self, word: u32) -> Result<&Instruction, ()> {
 		match self.decode_and_get_instruction_index(word) {
-			Ok(index) => {
-				if INSTRUCTIONS[index].name == COSIM_INSTRUCTIONS[index] {
-					Ok(&INSTRUCTIONS[index])
-				} else {
-					Err(())
-				}
-			}
+			Ok(index) => Ok(&INSTRUCTIONS[index]),
 			Err(()) => Err(()),
 		}
 	}
@@ -1009,7 +939,12 @@ impl Cpu {
 		for i in 0..INSTRUCTION_NUM {
 			let inst = &INSTRUCTIONS[i];
 			if (word & inst.mask) == inst.data {
-				return Ok(i);
+				if inst.name == COSIM_INSTRUCTIONS[i] {
+					return Ok(i);
+				} else {
+					return Err(());
+				}
+				// return Ok(i);
 			}
 		}
 		return Err(());
@@ -1307,6 +1242,8 @@ impl Cpu {
 		if (self.pc & 0x3) != 0 {
 			self.pc = (self.pc & !0x3) + 4 * (cause & 0xffff);
 		}
+
+		self.flush_pipeline();
 
 		match self.privilege_mode {
 			PrivilegeMode::Machine => {
@@ -2113,6 +2050,44 @@ impl Cpu {
 	/// Returns mutable `Mmu`
 	pub fn get_mut_mmu(&mut self) -> &mut Mmu {
 		&mut self.mmu
+	}
+
+	#[cfg(feature = "debug-register")]
+	fn print_registers(&self) {
+		println!("{}  : 0x{:016x}", "pc", self.pc);
+		println!(
+			"{}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} ",
+			"zero", self.x[0], "ra", self.x[1], "sp", self.x[2], "gp", self.x[3]
+		);
+		println!(
+			"{}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} ",
+			"tp", self.x[4], "t0", self.x[5], "t1", self.x[6], "t2", self.x[7]
+		);
+		println!(
+			"{}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} ",
+			"s0", self.x[8], "s1", self.x[9], "a0", self.x[10], "a1", self.x[11]
+		);
+		println!(
+			"{}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} ",
+			"a2", self.x[12], "a3", self.x[13], "a4", self.x[14], "a5", self.x[15]
+		);
+		println!(
+			"{}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} ",
+			"a6", self.x[16], "a7", self.x[17], "s2", self.x[18], "s3", self.x[19]
+		);
+		println!(
+			"{}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} ",
+			"s4", self.x[20], "s5", self.x[21], "s6", self.x[22], "s7", self.x[23]
+		);
+		println!(
+			"{}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} ",
+			"s8", self.x[24], "s9", self.x[25], "s10", self.x[26], "s11", self.x[27]
+		);
+		println!(
+			"{}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} {}  : 0x{:016x} ",
+			"t3", self.x[28], "t4", self.x[29], "t5", self.x[30], "t6", self.x[31]
+		);
+		println!("{}  : 0x{:016x}", "mstatus", self.csr[0x300]);
 	}
 }
 
