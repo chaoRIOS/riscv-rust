@@ -989,7 +989,13 @@ impl Cpu {
 	/// instead of `decode`.
 	pub fn decode_raw(&self, word: u32) -> Result<&Instruction, ()> {
 		match self.decode_and_get_instruction_index(word) {
-			Ok(index) => Ok(&INSTRUCTIONS[index]),
+			Ok(index) => {
+				if INSTRUCTIONS[index].name == COSIM_INSTRUCTIONS[index] {
+					Ok(&INSTRUCTIONS[index])
+				} else {
+					Err(())
+				}
+			}
 			Err(()) => Err(()),
 		}
 	}
