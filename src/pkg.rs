@@ -411,7 +411,18 @@ pub const FU_ALU: usize = 3;
 pub const FU_CTRL_FLOW: usize = 4;
 pub const FU_MULT: usize = 5;
 pub const FU_CSR: usize = 6;
+
+// Total FU types
 pub const FU_TYPES: usize = 7;
+
+// FU capacities
+pub const FU_NONE_NUM: usize = 1;
+pub const FU_LOAD_NUM: usize = 1;
+pub const FU_STORE_NUM: usize = 1;
+pub const FU_ALU_NUM: usize = 2;
+pub const FU_CTRL_FLOW_NUM: usize = 1;
+pub const FU_MULT_NUM: usize = 1;
+pub const FU_CSR_NUM: usize = 1;
 
 // FU_OP ENUMs
 pub const OP_ADD: u8 = 0;

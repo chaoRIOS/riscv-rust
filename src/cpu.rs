@@ -11,6 +11,10 @@ use pkg::{
 	ROB_CAPACITY,
 };
 
+use pkg::{
+	FU_ALU_NUM, FU_CSR_NUM, FU_CTRL_FLOW_NUM, FU_LOAD_NUM, FU_MULT_NUM, FU_NONE_NUM, FU_STORE_NUM,
+};
+
 pub const GPR_CAPACITY: usize = 32;
 pub const CSR_CAPACITY: usize = 4096;
 
@@ -51,9 +55,10 @@ const CSR_MIP_ADDRESS: u16 = 0x344;
 const _CSR_PMPCFG0_ADDRESS: u16 = 0x3a0;
 const _CSR_PMPADDR0_ADDRESS: u16 = 0x3b0;
 pub const CSR_MCYCLE_ADDRESS: u16 = 0xb00;
+const CSR_MINSTRET_ADDRESS: u16 = 0xb02;
 const _CSR_CYCLE_ADDRESS: u16 = 0xc00;
 const CSR_TIME_ADDRESS: u16 = 0xc01;
-pub const CSR_INSERT_ADDRESS: u16 = 0xc02;
+pub const CSR_INSTRET_ADDRESS: u16 = 0xc02;
 
 pub const CSR_HPMCOUNTER3_ADDRESS: u16 = 0xc03; // l1 hit
 pub const CSR_HPMCOUNTER4_ADDRESS: u16 = 0xc04; // l1 miss
@@ -96,7 +101,7 @@ pub struct Cpu {
 
 	// Calculating facilities for OOO execution
 	renaming_table: [[u64; 2]; GPR_CAPACITY],
-	function_unit_table: [u64; FU_TYPES],
+	function_unit_table: [VecDeque<u64>; FU_TYPES],
 	reorder_buffer: [u64; ROB_CAPACITY],
 	reorder_buffer_pointer: usize,
 
@@ -271,7 +276,15 @@ impl Cpu {
 			predictor: BranchPredictor::new(),
 
 			renaming_table: [[0; 2]; 32],
-			function_unit_table: [0; 7],
+			function_unit_table: [
+				VecDeque::from(vec![0; FU_NONE_NUM]),
+				VecDeque::from(vec![0; FU_LOAD_NUM]),
+				VecDeque::from(vec![0; FU_STORE_NUM]),
+				VecDeque::from(vec![0; FU_ALU_NUM]),
+				VecDeque::from(vec![0; FU_CTRL_FLOW_NUM]),
+				VecDeque::from(vec![0; FU_MULT_NUM]),
+				VecDeque::from(vec![0; FU_CSR_NUM]),
+			],
 			reorder_buffer: [0; ROB_CAPACITY],
 			reorder_buffer_pointer: 0,
 			last_instruction_retired_clock: 0,
@@ -352,8 +365,27 @@ impl Cpu {
 			.max_by(|x, y| x[1].cmp(&y[1]))
 			.unwrap()); 32];
 		// Normalize FU table to last completed operation
-		self.function_unit_table = [*(self.function_unit_table.iter().max().unwrap()); 7];
-		self.reorder_buffer = [0; ROB_CAPACITY];
+		// self.function_unit_table = [*(self.function_unit_table.iter().max().unwrap()); 7];
+
+		let last_used = *(self
+			.function_unit_table
+			.iter()
+			.map(|function_unit| *(function_unit.back().unwrap()))
+			.collect::<Vec<_>>()
+			.iter()
+			.max()
+			.unwrap());
+
+		self.function_unit_table = [
+			VecDeque::from(vec![last_used; FU_NONE_NUM]),
+			VecDeque::from(vec![last_used; FU_LOAD_NUM]),
+			VecDeque::from(vec![last_used; FU_STORE_NUM]),
+			VecDeque::from(vec![last_used; FU_ALU_NUM]),
+			VecDeque::from(vec![last_used; FU_CTRL_FLOW_NUM]),
+			VecDeque::from(vec![last_used; FU_MULT_NUM]),
+			VecDeque::from(vec![last_used; FU_CSR_NUM]),
+		];
+		self.reorder_buffer = [self.last_instruction_retired_clock; ROB_CAPACITY];
 	}
 
 	/// Runs program one cycle. Fetch, decode, and execution are completed in a cycle so far.
@@ -583,8 +615,10 @@ impl Cpu {
 					}
 
 					// 2. Get C(j-1)
-					let completed_clock_functional_unit: u64 =
-						self.function_unit_table[COSIM_INSTRUCTIONS_FU_T[index]];
+					let completed_clock_functional_unit: u64 = self.function_unit_table
+						[COSIM_INSTRUCTIONS_FU_T[index]]
+						.pop_front()
+						.unwrap();
 					// println!(
 					// 	"  {:?}\n  C[{}]={}",
 					// 	self.function_unit_table,
@@ -623,7 +657,8 @@ impl Cpu {
 						self.renaming_table[rd] = [retired_clock, completed_clock];
 					}
 					// 7.2 Functional unit
-					self.function_unit_table[COSIM_INSTRUCTIONS_FU_T[index]] = completed_clock;
+					self.function_unit_table[COSIM_INSTRUCTIONS_FU_T[index]]
+						.push_back(completed_clock);
 					// 7.3 ROB
 					self.reorder_buffer[self.reorder_buffer_pointer] = retired_clock;
 					self.reorder_buffer_pointer += 1;
@@ -771,8 +806,12 @@ impl Cpu {
 					self.mmu.clock = self.clock;
 
 					self.write_csr_raw(
-						CSR_INSERT_ADDRESS,
-						self.read_csr_raw(CSR_INSERT_ADDRESS) + 1,
+						CSR_INSTRET_ADDRESS,
+						self.read_csr_raw(CSR_INSTRET_ADDRESS) + 1,
+					);
+					self.write_csr_raw(
+						CSR_MINSTRET_ADDRESS,
+						self.read_csr_raw(CSR_MINSTRET_ADDRESS) + 1,
 					);
 				}
 				Err(e) => {

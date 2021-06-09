@@ -22,7 +22,7 @@ pub mod mmu;
 pub mod pkg;
 
 use cpu::{
-	Cpu, Xlen, CSR_HPMCOUNTER7_ADDRESS, CSR_HPMCOUNTER8_ADDRESS, CSR_INSERT_ADDRESS,
+	Cpu, Xlen, CSR_HPMCOUNTER7_ADDRESS, CSR_HPMCOUNTER8_ADDRESS, CSR_INSTRET_ADDRESS,
 	CSR_MCYCLE_ADDRESS,
 };
 
@@ -202,11 +202,11 @@ impl Emulator {
 		);
 		println!(
 			"total Instruction = {} instructions",
-			self.cpu.read_csr_raw(CSR_INSERT_ADDRESS)
+			self.cpu.read_csr_raw(CSR_INSTRET_ADDRESS)
 		);
 		println!(
 			"IPC = {} inst/cycle",
-			(self.cpu.read_csr_raw(CSR_INSERT_ADDRESS) as f32)
+			(self.cpu.read_csr_raw(CSR_INSTRET_ADDRESS) as f32)
 				/ (self.cpu.read_csr_raw(CSR_MCYCLE_ADDRESS) as f32)
 		);
 

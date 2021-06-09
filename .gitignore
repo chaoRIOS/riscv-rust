@@ -11,5 +11,6 @@ lab2/*.log
 lab2/*.txt
 lab2/*.s
 lab2/*.o
+lab3/*.py
 .vscode*
 .nfs*
