@@ -386,6 +386,11 @@ pub const BTB_COLUMNS: usize = usize::pow(2, BTB_OFFSET_BITS as u32);
 pub const BTB_INDEX_BITS: i32 = 6;
 pub const BTB_OFFSET_BITS: i32 = 5;
 
+pub const BHT_BITS: i32 = 2;
+pub const BHT_MAX_VALUE: i32 = i32::pow(2, BHT_BITS as u32) - 1;
+pub const BHT_MIN_VALUE: i32 = 0;
+pub const BHT_TAKEN_VALUE: i32 = BHT_MIN_VALUE + (BHT_MAX_VALUE + BHT_MIN_VALUE) / 2 + 1;
+
 #[cfg(feature = "direct-map")]
 pub const BHT_ROWS: usize = usize::pow(2, BHT_INDEX_BITS as u32);
 #[cfg(feature = "direct-map")]
@@ -394,14 +399,23 @@ pub const BHT_COLUMNS: usize = usize::pow(2, BHT_OFFSET_BITS as u32);
 pub const BHT_INDEX_BITS: i32 = 6;
 #[cfg(feature = "direct-map")]
 pub const BHT_OFFSET_BITS: i32 = 5;
-#[cfg(feature = "direct-map")]
-pub const BHT_BITS: i32 = 2;
-#[cfg(feature = "direct-map")]
-pub const BHT_MAX_VALUE: i32 = i32::pow(2, BHT_BITS as u32) - 1;
-#[cfg(feature = "direct-map")]
-pub const BHT_MIN_VALUE: i32 = 0;
-#[cfg(feature = "direct-map")]
-pub const BHT_TAKEN_VALUE: i32 = BHT_MIN_VALUE + (BHT_MAX_VALUE + BHT_MIN_VALUE) / 2 + 1;
+
+#[cfg(feature = "PAG")]
+pub const PAG_ROWS: usize = usize::pow(2, PAG_INDEX_BITS as u32);
+#[cfg(feature = "PAG")]
+pub const PAG_COLUMNS: usize = usize::pow(2, PAG_OFFSET_BITS as u32);
+#[cfg(feature = "PAG")]
+pub const PAG_INDEX_BITS: i32 = 10;
+#[cfg(feature = "PAG")]
+pub const PAG_OFFSET_BITS: i32 = 0;
+#[cfg(feature = "PAG")]
+pub const PAG_BITS: i32 = 10;
+#[cfg(feature = "PAG")]
+pub const BHT_NUMBER: usize = usize::pow(2, PAG_BITS as u32);
+#[cfg(feature = "PAG")]
+pub const PAG_MAX_VALUE: usize = BHT_NUMBER - 1;
+#[cfg(feature = "PAG")]
+pub const PAG_MIN_VALUE: usize = 0;
 
 pub const PENALTY_FLUSH_PIPELINE: u64 = 8;
 pub const PENALTY_FLUSH_FRONTEND: u64 = 2;

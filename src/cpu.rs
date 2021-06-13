@@ -739,7 +739,7 @@ impl Cpu {
 							#[cfg(feature = "debug-bp")]
 							{
 								println!(
-									"predict {}: 0x{:08x}",
+									"predict  {}: 0x{:08x}",
 									match predict_taken {
 										true => "take",
 										false => "no-take",
@@ -788,7 +788,7 @@ impl Cpu {
 							#[cfg(feature = "debug-bp")]
 							{
 								println!(
-									"predict {}: 0x{:08x}",
+									"predict  {}: 0x{:08x}",
 									match predict_taken {
 										true => "take",
 										false => "no-take",

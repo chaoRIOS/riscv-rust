@@ -11,9 +11,10 @@ getopts = "0.2"
 riscv_emu_rust = {path = "../" ,default-features = false, optional = true}
 
 [features]
-default = ["riscv_emu_rust","direct-map"]
+default = []
 
-direct-map = ["riscv_emu_rust","riscv_emu_rust/direct-map"]
+DM = ["riscv_emu_rust","riscv_emu_rust/direct-map"]
+PAG = ["riscv_emu_rust","riscv_emu_rust/PAG"]
 
 
 debug-disassemble = ["riscv_emu_rust","riscv_emu_rust/debug-disassemble"]
