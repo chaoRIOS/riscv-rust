@@ -14,14 +14,20 @@ use pkg::{
 	PAG_OFFSET_BITS, PAG_ROWS,
 };
 
+trait Predictor {
+	fn new() -> Self;
+
+	fn predict(&self, instruction_address: u64) -> bool;
+
+	fn update(&mut self, instruction_address: u64, eventually_taken: bool);
+}
+
 pub struct BranchPredictor {
 	pub branch_target_buffer: [[BTBEntry; BTB_COLUMNS]; BTB_ROWS],
 	#[cfg(feature = "direct-map")]
-	pub branch_history_table: [[BHTEntry; BHT_COLUMNS]; BHT_ROWS],
+	pub direct_mapping_predictor: DirectMappingPredictor,
 	#[cfg(feature = "PAG")]
-	pub pag_table: [[PAGEntry; PAG_COLUMNS]; PAG_ROWS],
-	#[cfg(feature = "PAG")]
-	pub branch_history_table: [BHTEntry; BHT_NUMBER],
+	pub per_address_global_predictor: PerAddressGlobalPredictor,
 }
 
 impl BranchPredictor {
@@ -29,39 +35,38 @@ impl BranchPredictor {
 		BranchPredictor {
 			branch_target_buffer: [[BTBEntry::new(); BTB_COLUMNS]; BTB_ROWS],
 			#[cfg(feature = "direct-map")]
-			branch_history_table: [[BHTEntry::new(); BHT_COLUMNS]; BHT_ROWS],
+			direct_mapping_predictor: DirectMappingPredictor::new(),
 			#[cfg(feature = "PAG")]
-			pag_table: [[PAGEntry::new(); PAG_COLUMNS]; PAG_ROWS],
-			#[cfg(feature = "PAG")]
-			branch_history_table: [BHTEntry::new(); BHT_NUMBER],
+			per_address_global_predictor: PerAddressGlobalPredictor::new(),
 		}
 	}
 
-	pub fn predict(&self, instruction_address: u64) -> (bool, u64) {
+	pub fn predict(&self, instruction_address: u64) -> (Vec<bool>, u64) {
 		let btb_index = (instruction_address >> BTB_OFFSET_BITS) & ((1 << BTB_INDEX_BITS) - 1);
 		let btb_offset = instruction_address & ((1 << BTB_OFFSET_BITS) - 1);
 
 		let btb_entry = self.branch_target_buffer[btb_index as usize][btb_offset as usize];
+		let mut predictions = vec![];
 		if btb_entry.is_valid() {
-			#[cfg(feature = "direct-map")]
-			{
-				let bht_index =
-					(instruction_address >> BHT_OFFSET_BITS) & ((1 << BHT_INDEX_BITS) - 1);
-				let bht_offset = instruction_address & ((1 << BHT_OFFSET_BITS) - 1);
-				let bht_entry = self.branch_history_table[bht_index as usize][bht_offset as usize];
-				return (bht_entry.is_taken(), btb_entry.get_address());
-			}
 			#[cfg(feature = "PAG")]
 			{
-				let pag_index =
-					(instruction_address >> PAG_OFFSET_BITS) & ((1 << PAG_INDEX_BITS) - 1);
-				let pag_offset = instruction_address & ((1 << PAG_OFFSET_BITS) - 1);
-				let pag_entry = self.pag_table[pag_index as usize][pag_offset as usize];
-				let bht_entry = self.branch_history_table[pag_entry.predictor_index];
-				return (bht_entry.is_taken(), btb_entry.get_address());
+				predictions.push(
+					self.per_address_global_predictor
+						.predict(instruction_address),
+				);
 			}
+			#[cfg(feature = "direct-map")]
+			{
+				predictions.push(self.direct_mapping_predictor.predict(instruction_address));
+			}
+			return (predictions, btb_entry.get_address());
 		}
-		(false, 0)
+		#[cfg(feature = "PAG")]
+		predictions.push(false);
+		#[cfg(feature = "direct-map")]
+		predictions.push(false);
+
+		(predictions, 0)
 	}
 
 	pub fn update(
@@ -72,78 +77,20 @@ impl BranchPredictor {
 	) {
 		let btb_index = (instruction_address >> BTB_OFFSET_BITS) & ((1 << BTB_INDEX_BITS) - 1);
 		let btb_offset = instruction_address & ((1 << BTB_OFFSET_BITS) - 1);
-		#[cfg(feature = "direct-map")]
-		let bht_index = (instruction_address >> BHT_OFFSET_BITS) & ((1 << BHT_INDEX_BITS) - 1);
-		#[cfg(feature = "direct-map")]
-		let bht_offset = instruction_address & ((1 << BHT_OFFSET_BITS) - 1);
-		#[cfg(feature = "PAG")]
-		let pag_index = (instruction_address >> PAG_OFFSET_BITS) & ((1 << PAG_INDEX_BITS) - 1);
-		#[cfg(feature = "PAG")]
-		let pag_offset = instruction_address & ((1 << PAG_OFFSET_BITS) - 1);
-		#[cfg(feature = "PAG")]
-		let bht_index = self.pag_table[pag_index as usize][pag_offset as usize].predictor_index;
-		#[cfg(feature = "debug-bp")]
-		{
-			#[cfg(feature = "direct-map")]
-			println!(
-				"Updating btb[{}][{}]:0x{:08x} bht[{}][{}]:{}",
-				btb_index,
-				btb_offset,
-				target_address,
-				bht_index,
-				bht_offset,
-				self.branch_history_table[bht_index as usize][bht_offset as usize].taken
-			);
-			#[cfg(feature = "PAG")]
-			println!(
-				"Updating btb[{}][{}]:0x{:08x} pag[{}][{}]:{} bht[{}]:{}",
-				btb_index,
-				btb_offset,
-				target_address,
-				pag_index,
-				pag_offset,
-				self.pag_table[pag_index as usize][pag_offset as usize].predictor_index,
-				bht_index,
-				self.branch_history_table[bht_index as usize].taken
-			);
-		}
 
 		self.branch_target_buffer[btb_index as usize][btb_offset as usize].set_valid();
 		self.branch_target_buffer[btb_index as usize][btb_offset as usize]
 			.set_address(target_address);
 
 		#[cfg(feature = "direct-map")]
-		self.branch_history_table[bht_index as usize][bht_offset as usize].update(eventually_taken);
+		{
+			self.direct_mapping_predictor
+				.update(instruction_address, eventually_taken);
+		}
 		#[cfg(feature = "PAG")]
 		{
-			self.pag_table[pag_index as usize][pag_offset as usize].update(eventually_taken);
-			self.branch_history_table[bht_index].update(eventually_taken);
-		}
-
-		#[cfg(feature = "debug-bp")]
-		{
-			#[cfg(feature = "direct-map")]
-			println!(
-				"Updated  btb[{}][{}]:0x{:08x} bht[{}][{}]:{}",
-				btb_index,
-				btb_offset,
-				target_address,
-				bht_index,
-				bht_offset,
-				self.branch_history_table[bht_index as usize][bht_offset as usize].taken
-			);
-			#[cfg(feature = "PAG")]
-			println!(
-				"Updated  btb[{}][{}]:0x{:08x} pag[{}][{}]:{} bht[{}]:{}",
-				btb_index,
-				btb_offset,
-				target_address,
-				pag_index,
-				pag_offset,
-				self.pag_table[pag_index as usize][pag_offset as usize].predictor_index,
-				bht_index,
-				self.branch_history_table[bht_index as usize].taken
-			);
+			self.per_address_global_predictor
+				.update(instruction_address, eventually_taken);
 		}
 	}
 }
@@ -224,5 +171,64 @@ impl PAGEntry {
 				}) & ((1 << PAG_BITS) - 1),
 			PAG_MIN_VALUE,
 		);
+	}
+}
+
+#[cfg(feature = "direct-map")]
+pub struct DirectMappingPredictor {
+	pub branch_history_table: [[BHTEntry; BHT_COLUMNS]; BHT_ROWS],
+}
+
+#[cfg(feature = "direct-map")]
+impl Predictor for DirectMappingPredictor {
+	fn new() -> Self {
+		DirectMappingPredictor {
+			branch_history_table: [[BHTEntry::new(); BHT_COLUMNS]; BHT_ROWS],
+		}
+	}
+
+	fn predict(&self, instruction_address: u64) -> bool {
+		let bht_index = (instruction_address >> BHT_OFFSET_BITS) & ((1 << BHT_INDEX_BITS) - 1);
+		let bht_offset = instruction_address & ((1 << BHT_OFFSET_BITS) - 1);
+		let bht_entry = self.branch_history_table[bht_index as usize][bht_offset as usize];
+		return bht_entry.is_taken();
+	}
+
+	fn update(&mut self, instruction_address: u64, eventually_taken: bool) {
+		let bht_index = (instruction_address >> BHT_OFFSET_BITS) & ((1 << BHT_INDEX_BITS) - 1);
+		let bht_offset = instruction_address & ((1 << BHT_OFFSET_BITS) - 1);
+		self.branch_history_table[bht_index as usize][bht_offset as usize].update(eventually_taken);
+	}
+}
+
+#[cfg(feature = "PAG")]
+pub struct PerAddressGlobalPredictor {
+	pub pag_table: [[PAGEntry; PAG_COLUMNS]; PAG_ROWS],
+	pub branch_history_table: [BHTEntry; BHT_NUMBER],
+}
+
+#[cfg(feature = "PAG")]
+impl Predictor for PerAddressGlobalPredictor {
+	fn new() -> Self {
+		PerAddressGlobalPredictor {
+			pag_table: [[PAGEntry::new(); PAG_COLUMNS]; PAG_ROWS],
+			branch_history_table: [BHTEntry::new(); BHT_NUMBER],
+		}
+	}
+
+	fn predict(&self, instruction_address: u64) -> bool {
+		let pag_index = (instruction_address >> PAG_OFFSET_BITS) & ((1 << PAG_INDEX_BITS) - 1);
+		let pag_offset = instruction_address & ((1 << PAG_OFFSET_BITS) - 1);
+		let bht_index = self.pag_table[pag_index as usize][pag_offset as usize].predictor_index;
+		let bht_entry = self.branch_history_table[bht_index as usize];
+		return bht_entry.is_taken();
+	}
+
+	fn update(&mut self, instruction_address: u64, eventually_taken: bool) {
+		let pag_index = (instruction_address >> PAG_OFFSET_BITS) & ((1 << PAG_INDEX_BITS) - 1);
+		let pag_offset = instruction_address & ((1 << PAG_OFFSET_BITS) - 1);
+		let bht_index = self.pag_table[pag_index as usize][pag_offset as usize].predictor_index;
+		self.pag_table[pag_index as usize][pag_offset as usize].update(eventually_taken);
+		self.branch_history_table[bht_index].update(eventually_taken);
 	}
 }

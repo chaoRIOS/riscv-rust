@@ -681,10 +681,11 @@ impl Cpu {
 
 					// Calculate branch prediction
 					match COSIM_INSTRUCTIONS[index] {
-						"BEQ" | "BGE" | "BGEU" | "BLT" | "BLTU" | "BNE" => {
+						"BEQ" | "BGE" | "BGEU" | "BLT" | "BLTU" | "BNE" | "JAL" | "JALR" => {
 							// Prediction
-							// (is_taken, address)
-							let (predict_taken, predict_address) =
+							// (predictions, address)
+							// Note: place the dominant result at front()
+							let (mut predictions, predict_address) =
 								self.predictor.predict(instruction_address);
 
 							let true_pc = match self.instruction_buffer.is_empty() {
@@ -692,65 +693,77 @@ impl Cpu {
 								false => self.instruction_buffer.front().unwrap().0,
 							};
 
-							let eventually_taken = (true_pc != (instruction_address + 2))
-								&& (true_pc != (instruction_address + 4));
+							let eventually_taken = match COSIM_INSTRUCTIONS[index] {
+								"BEQ" | "BGE" | "BGEU" | "BLT" | "BLTU" | "BNE" => {
+									(true_pc != (instruction_address + 2))
+										&& (true_pc != (instruction_address + 4))
+								}
+								"JAL" | "JALR" => true,
+								_ => false,
+							};
+
+							#[cfg(feature = "PAG")]
+							let PAG_prediction: bool = predictions.pop().unwrap();
+
+							#[cfg(feature = "direct-map")]
+							let direct_map_prediction: bool = predictions.pop().unwrap();
 
 							if eventually_taken {
-								if predict_taken && (true_pc == predict_address) {
-									// Correct prediction
-									#[cfg(feature = "debug-bp")]
-									println!("Correct");
-									self.write_csr_raw(
-										CSR_HPMCOUNTER7_ADDRESS,
-										self.read_csr_raw(CSR_HPMCOUNTER7_ADDRESS) + 1,
-									);
-									self.last_instruction_retired_clock += PENALTY_FLUSH_FRONTEND;
+								// Check BTB results
+								if true_pc == predict_address {
+									// Check PAg prediction, which is the overall result
+									#[cfg(feature = "PAG")]
+									if PAG_prediction {
+										// Correct prediction
+										self.correct_prediction_log();
+
+										self.last_instruction_retired_clock +=
+											PENALTY_FLUSH_FRONTEND;
+
+										// 1st stage prediction compensation
+										// Take-take penalty = 0
+										#[cfg(feature = "direct-map")]
+										if direct_map_prediction {
+											self.last_instruction_retired_clock -=
+												PENALTY_FLUSH_FRONTEND;
+										}
+									} else {
+										// if PAg fails then full penalty
+										self.wrong_prediction_update();
+									}
 								} else {
-									// Wrong prediction
-									#[cfg(feature = "debug-bp")]
-									println!("Wrong");
-									self.write_csr_raw(
-										CSR_HPMCOUNTER8_ADDRESS,
-										self.read_csr_raw(CSR_HPMCOUNTER8_ADDRESS) + 1,
-									);
-									self.last_instruction_retired_clock += PENALTY_FLUSH_PIPELINE;
+									// if BTB fails then full penalty
+									self.wrong_prediction_update();
 								}
 							} else {
-								if predict_taken == false {
+								// Considering not-taken
+								#[cfg(feature = "PAG")]
+								if PAG_prediction == false {
 									// Correct prediction
-									#[cfg(feature = "debug-bp")]
-									println!("Correct");
-									self.write_csr_raw(
-										CSR_HPMCOUNTER7_ADDRESS,
-										self.read_csr_raw(CSR_HPMCOUNTER7_ADDRESS) + 1,
-									);
+									self.correct_prediction_log();
 									self.last_instruction_retired_clock += 0;
 								} else {
-									// Wrong prediction
-									#[cfg(feature = "debug-bp")]
-									println!("Wrong");
-									self.write_csr_raw(
-										CSR_HPMCOUNTER8_ADDRESS,
-										self.read_csr_raw(CSR_HPMCOUNTER8_ADDRESS) + 1,
-									);
-									self.last_instruction_retired_clock += PENALTY_FLUSH_PIPELINE;
+									// if PAg fails then full penalty
+									self.wrong_prediction_update();
 								}
 							}
+
 							#[cfg(feature = "debug-bp")]
 							{
+								#[cfg(feature = "PAG")]
 								println!(
 									"predict  {}: 0x{:08x}",
-									match predict_taken {
-										true => "take",
-										false => "no-take",
+									match PAG_prediction {
+										true => "T",
+										false => "N",
 									},
 									predict_address
 								);
 								println!(
 									"actually {}: 0x{:08x}",
 									match eventually_taken {
-										true => "take",
-										false => "no-take",
+										true => "T",
+										false => "N",
 									},
 									true_pc
 								);
@@ -758,46 +771,6 @@ impl Cpu {
 
 							self.predictor
 								.update(instruction_address, true_pc, eventually_taken);
-						}
-						"JAL" | "JALR" => {
-							// Prediction
-							// (is_taken, address)
-							let (predict_taken, predict_address) =
-								self.predictor.predict(instruction_address);
-
-							if (predict_taken == true) && (predict_address == self.pc) {
-								// Correct prediction
-								#[cfg(feature = "debug-bp")]
-								println!("Correct");
-								self.write_csr_raw(
-									CSR_HPMCOUNTER7_ADDRESS,
-									self.read_csr_raw(CSR_HPMCOUNTER7_ADDRESS) + 1,
-								);
-								self.last_instruction_retired_clock += PENALTY_FLUSH_FRONTEND;
-							} else {
-								// Wrong prediction
-								#[cfg(feature = "debug-bp")]
-								println!("Wrong");
-								self.write_csr_raw(
-									CSR_HPMCOUNTER8_ADDRESS,
-									self.read_csr_raw(CSR_HPMCOUNTER8_ADDRESS) + 1,
-								);
-								self.last_instruction_retired_clock += PENALTY_FLUSH_PIPELINE;
-							}
-
-							#[cfg(feature = "debug-bp")]
-							{
-								println!(
-									"predict  {}: 0x{:08x}",
-									match predict_taken {
-										true => "take",
-										false => "no-take",
-									},
-									predict_address
-								);
-								println!("actually take: 0x{:08x}", self.pc);
-							}
-							self.predictor.update(instruction_address, self.pc, true);
 						}
 						_ => {}
 					}
@@ -840,6 +813,25 @@ impl Cpu {
 			self.write_csr_raw(CSR_HPMCOUNTER6_ADDRESS, self.mmu.l2_cache.miss_num);
 		}
 		self.last_instruction_retired_clock += 1;
+	}
+
+	fn correct_prediction_log(&mut self) {
+		#[cfg(feature = "debug-bp")]
+		println!("Correct");
+		self.write_csr_raw(
+			CSR_HPMCOUNTER7_ADDRESS,
+			self.read_csr_raw(CSR_HPMCOUNTER7_ADDRESS) + 1,
+		);
+	}
+
+	fn wrong_prediction_update(&mut self) {
+		#[cfg(feature = "debug-bp")]
+		println!("Wrong");
+		self.write_csr_raw(
+			CSR_HPMCOUNTER8_ADDRESS,
+			self.read_csr_raw(CSR_HPMCOUNTER8_ADDRESS) + 1,
+		);
+		self.last_instruction_retired_clock += PENALTY_FLUSH_PIPELINE;
 	}
 
 	pub fn execute_instruction(
