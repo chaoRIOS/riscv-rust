@@ -3,7 +3,6 @@ PROJ_DIR=$(WORK_DIR)/riscv-rust
 
 DEBUG_PATH=$(PROJ_DIR)/target/debug
 RELEASE_PATH=$(PROJ_DIR)/target/release
-features=default
 
 
 TEST_PATH = /opt/riscv-tests
@@ -14,7 +13,7 @@ rvtest=dhrystone
 COREMARK_PATH = $(TEST_PATH)/coremark/coremark.riscv
 
 
-
+features=default
 run_rvtest:
 	cargo run --release --features=$(features) -- -i $(RISCV_TEST_PATH)/$(rvtest).riscv
 
@@ -28,4 +27,5 @@ run_test:
 	cargo run --release --features=$(features) -- -i $(RIOS_TEST_PATH)/$(testcase)
 
 rls:
+	cargo build --release --features=$(features)
 	cp $(RELEASE_PATH)/lab3 $(RELEASE_PATH)/lab3_LTS

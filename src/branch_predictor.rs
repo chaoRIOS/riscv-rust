@@ -1,12 +1,16 @@
 use std::cmp;
 
+use pkg::{BTB_COLUMNS, BTB_INDEX_BITS, BTB_OFFSET_BITS, BTB_ROWS};
+
+#[cfg(feature = "direct-map")]
 use pkg::{
 	BHT_COLUMNS, BHT_INDEX_BITS, BHT_MAX_VALUE, BHT_MIN_VALUE, BHT_OFFSET_BITS, BHT_ROWS,
-	BHT_TAKEN_VALUE, BTB_COLUMNS, BTB_INDEX_BITS, BTB_OFFSET_BITS, BTB_ROWS,
+	BHT_TAKEN_VALUE,
 };
 
 pub struct BranchPredictor {
 	pub branch_target_buffer: [[BTBEntry; BTB_COLUMNS]; BTB_ROWS],
+	#[cfg(feature = "direct-map")]
 	pub branch_history_table: [[BHTEntry; BHT_COLUMNS]; BHT_ROWS],
 }
 
@@ -14,6 +18,7 @@ impl BranchPredictor {
 	pub fn new() -> Self {
 		BranchPredictor {
 			branch_target_buffer: [[BTBEntry::new(); BTB_COLUMNS]; BTB_ROWS],
+			#[cfg(feature = "direct-map")]
 			branch_history_table: [[BHTEntry::new(); BHT_COLUMNS]; BHT_ROWS],
 		}
 	}
@@ -24,13 +29,16 @@ impl BranchPredictor {
 
 		let btb_entry = self.branch_target_buffer[btb_index as usize][btb_offset as usize];
 		if btb_entry.is_valid() {
-			let bht_index = (instruction_address >> BHT_OFFSET_BITS) & ((1 << BHT_INDEX_BITS) - 1);
-			let bht_offset = instruction_address & ((1 << BHT_OFFSET_BITS) - 1);
-			let bht_entry = self.branch_history_table[bht_index as usize][bht_offset as usize];
-			(bht_entry.is_taken(), btb_entry.get_address())
-		} else {
-			(false, 0)
+			#[cfg(feature = "direct-map")]
+			{
+				let bht_index =
+					(instruction_address >> BHT_OFFSET_BITS) & ((1 << BHT_INDEX_BITS) - 1);
+				let bht_offset = instruction_address & ((1 << BHT_OFFSET_BITS) - 1);
+				let bht_entry = self.branch_history_table[bht_index as usize][bht_offset as usize];
+				return (bht_entry.is_taken(), btb_entry.get_address());
+			}
 		}
+		(false, 0)
 	}
 
 	pub fn update(
@@ -58,6 +66,7 @@ impl BranchPredictor {
 		self.branch_target_buffer[btb_index as usize][btb_offset as usize].set_valid();
 		self.branch_target_buffer[btb_index as usize][btb_offset as usize]
 			.set_address(target_address);
+		#[cfg(feature = "direct-map")]
 		self.branch_history_table[bht_index as usize][bht_offset as usize].update(eventually_taken);
 		#[cfg(feature = "debug-bp")]
 		{
@@ -105,11 +114,13 @@ impl BTBEntry {
 	}
 }
 
+#[cfg(feature = "direct-map")]
 #[derive(Copy, Clone)]
 pub struct BHTEntry {
 	taken: i32,
 }
 
+#[cfg(feature = "direct-map")]
 impl BHTEntry {
 	pub fn new() -> Self {
 		BHTEntry {

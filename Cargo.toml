@@ -23,6 +23,10 @@ memdump = []
 
 statistics-cache = []
 
+# branch prediction strategy
+direct-map = []
+PAG = []
+
 debug = ["debug-cache", "debug-dramsim", "debug-disassemble", "debug-tohost", "debug-register","debug-bp","debug-calculate"]
 debug-cache = []
 debug-dramsim = ["dramsim"]

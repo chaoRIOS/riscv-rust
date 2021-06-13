@@ -801,7 +801,6 @@ impl Cpu {
 						}
 						_ => {}
 					}
-
 					self.clock = retired_clock;
 					self.mmu.clock = self.clock;
 
