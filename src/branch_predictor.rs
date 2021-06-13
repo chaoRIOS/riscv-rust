@@ -8,7 +8,7 @@ use pkg::{BTB_COLUMNS, BTB_INDEX_BITS, BTB_OFFSET_BITS, BTB_ROWS};
 #[cfg(feature = "direct-map")]
 use pkg::{BHT_COLUMNS, BHT_INDEX_BITS, BHT_OFFSET_BITS, BHT_ROWS};
 
-#[cfg(feature = "PAG")]
+#[cfg(feature = "PAg")]
 use pkg::{
 	BHT_NUMBER, PAG_BITS, PAG_COLUMNS, PAG_INDEX_BITS, PAG_MAX_VALUE, PAG_MIN_VALUE,
 	PAG_OFFSET_BITS, PAG_ROWS,
@@ -26,7 +26,7 @@ pub struct BranchPredictor {
 	pub branch_target_buffer: [[BTBEntry; BTB_COLUMNS]; BTB_ROWS],
 	#[cfg(feature = "direct-map")]
 	pub direct_mapping_predictor: DirectMappingPredictor,
-	#[cfg(feature = "PAG")]
+	#[cfg(feature = "PAg")]
 	pub per_address_global_predictor: PerAddressGlobalPredictor,
 }
 
@@ -36,7 +36,7 @@ impl BranchPredictor {
 			branch_target_buffer: [[BTBEntry::new(); BTB_COLUMNS]; BTB_ROWS],
 			#[cfg(feature = "direct-map")]
 			direct_mapping_predictor: DirectMappingPredictor::new(),
-			#[cfg(feature = "PAG")]
+			#[cfg(feature = "PAg")]
 			per_address_global_predictor: PerAddressGlobalPredictor::new(),
 		}
 	}
@@ -48,7 +48,7 @@ impl BranchPredictor {
 		let btb_entry = self.branch_target_buffer[btb_index as usize][btb_offset as usize];
 		let mut predictions = vec![];
 		if btb_entry.is_valid() {
-			#[cfg(feature = "PAG")]
+			#[cfg(feature = "PAg")]
 			{
 				predictions.push(
 					self.per_address_global_predictor
@@ -61,7 +61,7 @@ impl BranchPredictor {
 			}
 			return (predictions, btb_entry.get_address());
 		}
-		#[cfg(feature = "PAG")]
+		#[cfg(feature = "PAg")]
 		predictions.push(false);
 		#[cfg(feature = "direct-map")]
 		predictions.push(false);
@@ -87,7 +87,7 @@ impl BranchPredictor {
 			self.direct_mapping_predictor
 				.update(instruction_address, eventually_taken);
 		}
-		#[cfg(feature = "PAG")]
+		#[cfg(feature = "PAg")]
 		{
 			self.per_address_global_predictor
 				.update(instruction_address, eventually_taken);
@@ -150,13 +150,13 @@ impl BHTEntry {
 	}
 }
 
-#[cfg(feature = "PAG")]
+#[cfg(feature = "PAg")]
 #[derive(Copy, Clone)]
 pub struct PAGEntry {
 	predictor_index: usize,
 }
 
-#[cfg(feature = "PAG")]
+#[cfg(feature = "PAg")]
 impl PAGEntry {
 	pub fn new() -> Self {
 		PAGEntry { predictor_index: 0 }
@@ -201,13 +201,13 @@ impl Predictor for DirectMappingPredictor {
 	}
 }
 
-#[cfg(feature = "PAG")]
+#[cfg(feature = "PAg")]
 pub struct PerAddressGlobalPredictor {
 	pub pag_table: [[PAGEntry; PAG_COLUMNS]; PAG_ROWS],
 	pub branch_history_table: [BHTEntry; BHT_NUMBER],
 }
 
-#[cfg(feature = "PAG")]
+#[cfg(feature = "PAg")]
 impl Predictor for PerAddressGlobalPredictor {
 	fn new() -> Self {
 		PerAddressGlobalPredictor {

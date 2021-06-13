@@ -11,13 +11,14 @@ getopts = "0.2"
 riscv_emu_rust = {path = "../" ,default-features = false, optional = true}
 
 [features]
-default = []
+default = ["direct-map","PAg"]
 
-DM = ["riscv_emu_rust","riscv_emu_rust/direct-map"]
-PAG = ["riscv_emu_rust","riscv_emu_rust/PAG"]
+# Branch predictor types
+direct-map = ["riscv_emu_rust/direct-map"]
+PAg = ["riscv_emu_rust/PAg"]
 
 
-debug-disassemble = ["riscv_emu_rust","riscv_emu_rust/debug-disassemble"]
-debug-register = ["riscv_emu_rust","riscv_emu_rust/debug-register"]
-debug-bp = ["riscv_emu_rust","riscv_emu_rust/debug-bp"]
-debug-tohost = ["riscv_emu_rust","riscv_emu_rust/debug-tohost"]
+debug-disassemble = ["riscv_emu_rust/debug-disassemble"]
+debug-register = ["riscv_emu_rust/debug-register"]
+debug-bp = ["riscv_emu_rust/debug-bp"]
+debug-tohost = ["riscv_emu_rust/debug-tohost"]

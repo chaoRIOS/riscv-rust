@@ -702,8 +702,8 @@ impl Cpu {
 								_ => false,
 							};
 
-							#[cfg(feature = "PAG")]
-							let PAG_prediction: bool = predictions.pop().unwrap();
+							#[cfg(feature = "PAg")]
+							let pag_prediction: bool = predictions.pop().unwrap();
 
 							#[cfg(feature = "direct-map")]
 							let direct_map_prediction: bool = predictions.pop().unwrap();
@@ -712,8 +712,8 @@ impl Cpu {
 								// Check BTB results
 								if true_pc == predict_address {
 									// Check PAg prediction, which is the overall result
-									#[cfg(feature = "PAG")]
-									if PAG_prediction {
+									#[cfg(feature = "PAg")]
+									if pag_prediction {
 										// Correct prediction
 										self.correct_prediction_log();
 
@@ -737,8 +737,8 @@ impl Cpu {
 								}
 							} else {
 								// Considering not-taken
-								#[cfg(feature = "PAG")]
-								if PAG_prediction == false {
+								#[cfg(feature = "PAg")]
+								if pag_prediction == false {
 									// Correct prediction
 									self.correct_prediction_log();
 									self.last_instruction_retired_clock += 0;
@@ -750,10 +750,10 @@ impl Cpu {
 
 							#[cfg(feature = "debug-bp")]
 							{
-								#[cfg(feature = "PAG")]
+								#[cfg(feature = "PAg")]
 								println!(
 									"predict  {}: 0x{:08x}",
-									match PAG_prediction {
+									match pag_prediction {
 										true => "T",
 										false => "N",
 									},
