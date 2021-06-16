@@ -418,7 +418,7 @@ pub const PAG_MAX_VALUE: usize = BHT_NUMBER - 1;
 pub const PAG_MIN_VALUE: usize = 0;
 
 pub const PENALTY_FLUSH_PIPELINE: u64 = 8;
-pub const PENALTY_FLUSH_FRONTEND: u64 = 2;
+pub const PENALTY_FLUSH_FRONTEND: u64 = 3;
 
 // Impl globals
 pub const LEN_FU: usize = 4;

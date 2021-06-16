@@ -742,6 +742,13 @@ impl Cpu {
 									// Correct prediction
 									self.correct_prediction_log();
 									self.last_instruction_retired_clock += 0;
+									// 1st stage prediction penalty
+									// Take-notake-notake penalty = 3
+									#[cfg(feature = "direct-map")]
+									if direct_map_prediction {
+										self.last_instruction_retired_clock +=
+											PENALTY_FLUSH_FRONTEND;
+									}
 								} else {
 									// if PAg fails then full penalty
 									self.wrong_prediction_update();
