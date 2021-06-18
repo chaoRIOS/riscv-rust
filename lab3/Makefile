@@ -10,10 +10,16 @@ TEST_PATH = /opt/riscv-tests
 RISCV_TEST_PATH = $(TEST_PATH)/benchmarks
 rvtest=dhrystone
 
+EMBENCH_PATH = $(TEST_PATH)/embench-iot/bd/src/
+embench=aha-mont64
+
 COREMARK_PATH = $(TEST_PATH)/coremark/coremark.riscv
 
 
 features=default
+run_embench:
+	cargo run --release --features=$(features) -- -i $(EMBENCH_PATH)/$(embench)/$(embench)
+
 run_rvtest:
 	cargo run --release --features=$(features) -- -i $(RISCV_TEST_PATH)/$(rvtest).riscv
 
