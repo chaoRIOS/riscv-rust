@@ -20,7 +20,7 @@ You can run Linux or xv6 on the emulator in your browser. [Online demo is here](
 git clone git@github.com:chaoRIOS/riscv-rust.git
 cd riscv-rust
 git remote add rioslab git@github.com:chaoRIOS/riscv-rust.git
-git checkout rioslab/lab1
+git checkout rioslab/lab3
 ```
 
 ## Setting up VS Code
